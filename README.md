@@ -29,7 +29,7 @@ async fn main() -> Result<(), atgeo::Error> {
 
 Misspellings are fine; matching is fuzzy, and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
 
-The blocking client is the same without the `.await`:
+The async example needs `tokio` (with its `macros` and `rt` features) in your own dependencies for `#[tokio::main]`; the crate itself doesn't depend on Tokio, though its default transport needs a Tokio runtime to run on. The blocking client, behind the `ureq` feature (below), is the same without the `.await`:
 
 ```rust,no_run
 use atgeo::{Region, SearchOptions, blocking::AtgeoClient};
@@ -64,7 +64,7 @@ Features:
 
 So `atgeo = { git = "…", rev = "…", default-features = false, features = ["ureq"] }` is the blocking client with no async stack at all. With no features, the core is 13 crates: serde_json, futures-util and two Unicode tables, plus their dependencies. TLS is rustls in both transports, with the operating system's root certificates; nothing pulls in OpenSSL.
 
-It needs Rust 1.85 or later (edition 2024). On 1.85 to 1.87, a current lockfile can pick an `icu_*` 2.4 crate (through reqwest → url → idna), which needs 1.88. Cargo's MSRV-aware resolver avoids it; an edition-2021 app gets that with `resolver = "3"` in its `Cargo.toml`, or else `cargo update -p icu_provider --precise 2.1.1`.
+It needs Rust 1.85 or later (edition 2024). Through reqwest → url → idna, a current lockfile picks `icu_*` crates that need a newer Rust (2.2 needs 1.86, 2.4 needs 1.88), and on 1.85 the build fails. Cargo's MSRV-aware resolver picks versions that build instead. Edition 2024 turns it on; an edition-2021 app on 1.85 to 1.87 needs `resolver = "3"` in its `Cargo.toml` (under `[package]`, or `[workspace]` in a workspace), then a fresh `cargo update`. CI builds such an app on 1.85.
 
 ## Constructing a client
 
@@ -226,7 +226,7 @@ To search, the client asks the server which tiles cover an area, downloads those
 What does go on the wire:
 
 - `getTiles` with the snapped bbox, the search's dataset, and its collection if it has one. A region that crosses the antimeridian sends two.
-- Requests for the tile URLs the server returned, exactly as served, minus any already in the cache. So the server can tell which of those tiles this client fetched before (that you searched near here recently) but nothing finer than the tiles themselves.
+- Requests for the tile URLs the server returned, as served (with only the percent-encoding a browser would add; see `CONFORMANCE.md`), minus any already in the cache. So the server can tell which of those tiles this client fetched before (that you searched near here recently) but nothing finer than the tiles themselves.
 - `describeService` and `describeTileset`, only if you call them.
 - `get_place` on a cache miss sends the origin of the place you asked for.
 
@@ -246,7 +246,7 @@ There is no persistence; a new client starts cold. Neither default transport has
 cargo test --all-features
 ```
 
-`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization and Jaro-Winkler fixtures and the contract's worked tables. The tests in `tests/` port the reference's tests, running each against both clients and a fake server that checks its own traffic. `tests/transports.rs` runs the two real transports against a loopback server.
+`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization and Jaro-Winkler fixtures and the contract's worked tables. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
 
 `CONFORMANCE.md` lists where this port differs from the reference at the edges the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open, mostly in how malformed JSON and odd URLs are handled. None of it comes up with a garganorn server. [`rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js is the design this port was built to, and `DECISIONS.md` records where the build departed from it.
 

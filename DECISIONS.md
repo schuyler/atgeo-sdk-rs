@@ -1,6 +1,6 @@
 # Decisions
 
-This port was built to the Rust spec, [`docs/rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js (still in schuyler/atgeo-sdk-js#21 when this was written), against the port contract on that repository's `main`. This file records what the spec left to the builder, and where the build departs from it and why. `CONFORMANCE.md` covers where the port's behaviour differs from the reference.
+This port was built to the Rust spec, [`docs/rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js (added in schuyler/atgeo-sdk-js#21 and brought up to date with this port in #24), against the port contract on that repository's `main`. This file records what the spec left to the builder, and where the build departs from it and why. `CONFORMANCE.md` covers where the port's behaviour differs from the reference.
 
 ## Where the build departs from the spec
 

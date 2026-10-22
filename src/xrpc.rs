@@ -27,8 +27,9 @@ pub(crate) fn strip_server(server: &str) -> String {
 
 /// Prepares a URL the way WHATWG URL parsing treats these characters: leading and trailing C0 controls
 /// and spaces trimmed, tab, LF and CR dropped, and space, other controls, non-ASCII and `" < > ` { }`
-/// percent-encoded, with `%XX` left alone. A clean URL is unchanged. (WHATWG leaves `` ` ``, `{` and `}`
-/// raw in a query; encoded, they decode to the same value.)
+/// percent-encoded, with `%XX` left alone. A clean URL is unchanged. (In a query WHATWG leaves `` ` ``, `{`
+/// and `}` raw, which this encodes, and encodes `'`, which this leaves raw; either way the server decodes
+/// the same value.)
 pub(crate) fn prepare_url(url: &str) -> String {
     let url = url.trim_matches(|c: char| c <= ' ');
     let mut out = String::with_capacity(url.len());

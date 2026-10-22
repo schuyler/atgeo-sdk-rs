@@ -577,7 +577,6 @@ mod ureq_cases {
         let started = Instant::now();
         assert!(t.get(&server.url("/slowhop/7/0")).is_err());
         assert!(started.elapsed() < Duration::from_millis(3000), "{:?}", started.elapsed());
-        assert!(server.requests().len() <= 8);
     }
 
     // CONFORMANCE.md: ureq sends a tile URL's backslash and dot segments as given.

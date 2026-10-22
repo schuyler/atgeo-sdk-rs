@@ -40,10 +40,11 @@ The client checks and prepares every URL before a transport sees one (`src/xrpc.
 | Input | This port | Reference (`fetch`) |
 |---|---|---|
 | `` ` ``, `{` or `}` in a query | percent-encoded (a server decodes it to the same value) | sent raw |
+| `'` in a query | `ReqwestTransport` percent-encodes it, as `fetch` does; `UreqTransport` sends it raw | `%27` |
 | A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given | `/`, resolved |
 | A non-ASCII host (`café.example`) | `ReqwestTransport` sends it in punycode, as `fetch` does; `UreqTransport` fails the request, since the host arrives percent-encoded rather than in punycode | punycode |
 | An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile | `https://h/x` |
-| A redirect to `https:/elsewhere` | a transport error, in both transports | resolved against the current host |
+| A redirect to `https:/elsewhere` (a scheme and a path, no `//`) | `ReqwestTransport` resolves it as `fetch` does; `UreqTransport` fails the request | `https://<current host>/elsewhere` when the scheme is the current URL's |
 
 A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
 
