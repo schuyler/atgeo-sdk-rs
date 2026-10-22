@@ -1,0 +1,166 @@
+[
+  {
+    "input": "Café",
+    "expected": "cafe"
+  },
+  {
+    "input": "Señor",
+    "expected": "senor"
+  },
+  {
+    "input": "Über",
+    "expected": "uber"
+  },
+  {
+    "input": "naïve",
+    "expected": "naive"
+  },
+  {
+    "input": "ﬁsh",
+    "expected": "fish"
+  },
+  {
+    "input": "ﬁnance ﬂour",
+    "expected": "finance flour"
+  },
+  {
+    "input": "ＡＢＣ Ｃａｆé",
+    "expected": "abc cafe"
+  },
+  {
+    "input": "ＭＵＮＩＣＨ",
+    "expected": "munich"
+  },
+  {
+    "input": "MiXeD CaSe",
+    "expected": "mixed case"
+  },
+  {
+    "input": "Blue Bottle Coffee",
+    "expected": "blue bottle coffee"
+  },
+  {
+    "input": "a\tb\nc",
+    "expected": "a b c"
+  },
+  {
+    "input": "  many   spaces\there  ",
+    "expected": "many spaces here"
+  },
+  {
+    "input": "  leading",
+    "expected": "leading"
+  },
+  {
+    "input": "trailing  ",
+    "expected": "trailing"
+  },
+  {
+    "input": "already normalized",
+    "expected": "already normalized"
+  },
+  {
+    "input": "ascii",
+    "expected": "ascii"
+  },
+  {
+    "input": "",
+    "expected": ""
+  },
+  {
+    "input": "   ",
+    "expected": ""
+  },
+  {
+    "input": "\t\n ",
+    "expected": ""
+  },
+  {
+    "input": "東京タワー",
+    "expected": "東京タワー"
+  },
+  {
+    "input": "Москва",
+    "expected": "москва"
+  },
+  {
+    "input": "Санкт-Петербург",
+    "expected": "санкт-петербург"
+  },
+  {
+    "input": "Zürich Café Müller",
+    "expected": "zurich cafe muller"
+  },
+  {
+    "input": "St. Mary's",
+    "expected": "st. mary's"
+  },
+  {
+    "input": "Crème Brûlée",
+    "expected": "creme brulee"
+  },
+  {
+    "input": "São Paulo",
+    "expected": "sao paulo"
+  },
+  {
+    "input": "Å",
+    "expected": "a"
+  },
+  {
+    "input": "é",
+    "expected": "e"
+  },
+  {
+    "input": "x y",
+    "expected": "x y"
+  },
+  {
+    "input": "　東京　",
+    "expected": "東京"
+  },
+  {
+    "input": "ΟΔΟΣ",
+    "expected": "οδος"
+  },
+  {
+    "input": "Ὀδυσσεύς",
+    "expected": "οδυσσευς"
+  },
+  {
+    "input": "Α.Σ.",
+    "expected": "α.ς."
+  },
+  {
+    "input": "ΑΣ.Α",
+    "expected": "ασ.α"
+  },
+  {
+    "input": "İstanbul",
+    "expected": "istanbul"
+  },
+  {
+    "input": "ẞ",
+    "expected": "ß"
+  },
+  {
+    "input": "ℌello",
+    "expected": "hello"
+  },
+  {
+    "input": "𝐇𝐞𝐥𝐥𝐨 𝐖𝐨𝐫𝐥𝐝",
+    "expected": "hello world"
+  },
+  {
+    "input": "ℍ𝔸𝕄",
+    "expected": "ham"
+  },
+  {
+    "input": "㎒",
+    "expected": "mhz"
+  },
+  {
+    "input": "𝚺𝚨𝚺",
+    "expected": "σας"
+  }
+]
