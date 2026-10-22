@@ -109,7 +109,7 @@ fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result
         }
     };
     let nearby = client.search(c.region, options().sort(SortMode::Distance)).map_err(fail)?;
-    check(nearby.complete, &format!("{} tile(s) failed", nearby.tiles.failed))?;
+    check(nearby.complete, &format!("{} tile(s) failed: {:?}", nearby.tiles.failed, nearby.tile_failures))?;
     check(!nearby.places.is_empty(), "no places in region")?;
     let distances: Vec<f64> = nearby.places.iter().map(|h| h.distance).collect();
     check(

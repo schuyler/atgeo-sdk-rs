@@ -8,14 +8,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use crate::cache::{CachedTile, TileCache, TileRecord, TtlCache};
-use crate::error::{ArgumentError, Error};
+use crate::error::{ArgumentError, DecodingError, Error};
 use crate::locations::{in_region, locate, record_key};
 use crate::rank::{cmp_utf16, rank};
 use crate::region::{center, query_bboxes, validate};
 use crate::text::{Query, normalize};
 use crate::transport::{BoxError, HttpResponse};
 use crate::types::{
-    PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, TileCounts, Tileset,
+    PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, TileCounts, TileFailure,
+    TileFailureKind, Tileset,
 };
 use crate::wire::{self, TileList};
 use crate::xrpc;
@@ -28,12 +29,18 @@ pub(crate) const MAX_TILES_IN_FLIGHT: usize = 8;
 
 pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
-/// Records of a tile a search used, with the generation of the cache entry they came from; `None` for a
-/// failed tile.
-pub(crate) type Slot = Option<(u64, Arc<[TileRecord]>)>;
+/// Records of a tile a search used, with the generation of the cache entry they came from.
+pub(crate) type Used = (u64, Arc<[TileRecord]>);
+
+/// What one tile of a search came to: its records, or why it failed.
+pub(crate) type Slot = Result<Used, TileFailure>;
 
 /// Parsed tiles by URL, each with the generation of the cache entry it was parsed from.
-type ParsedTiles = HashMap<String, (u64, Arc<[TileRecord]>)>;
+type ParsedTiles = HashMap<String, Used>;
+
+/// The error of a refused tile URL. It names no URL: the failure carries that, and a URL with credentials
+/// should not be repeated wherever the error is printed.
+const REFUSED: &str = "tile URL is not an absolute http or https URL without credentials";
 
 /// A cache is an optimization: every critical section leaves it consistent before anything in it can
 /// panic, so a poisoned lock is recovered rather than failing every later call.
@@ -59,12 +66,11 @@ pub(crate) struct Plan {
 
 /// What one tile needs.
 pub(crate) enum TileStep {
-    /// From the cache, without a request.
-    Cached(Slot),
+    /// Nothing: a tile from the cache, or a URL refused without a request (not an absolute http or https
+    /// URL without credentials).
+    Done(Slot),
     /// A request to this (prepared) URL.
     Fetch(String),
-    /// Not an absolute http or https URL without credentials: a failed tile, without a request.
-    Failed,
 }
 
 /// What a call that can be answered from cache needs.
@@ -211,10 +217,12 @@ impl Engine {
         (urls, lists.iter().any(|l| l.overview))
     }
 
-    fn records_of(&self, tile: &CachedTile) -> Option<Arc<[TileRecord]>> {
+    /// A cached tile's records. Only a body that was parsed once can be here, so an error is one a
+    /// deterministic parser cannot give; it is reported as a `decode` failure all the same (§4.4).
+    fn records_of(&self, tile: &CachedTile) -> Result<Arc<[TileRecord]>, DecodingError> {
         if let Some((generation, records)) = lock(&self.parsed).get(&tile.url) {
             if *generation == tile.generation {
-                return Some(records.clone());
+                return Ok(records.clone());
             }
         }
         wire::tile_records(&tile.body).map(Arc::from)
@@ -225,32 +233,60 @@ impl Engine {
     pub(crate) fn tile_step(&self, url: &str) -> TileStep {
         let cached = lock(&self.tiles).get(url);
         if let Some(tile) = cached {
-            return TileStep::Cached(self.records_of(&tile).map(|r| (tile.generation, r)));
+            return TileStep::Done(
+                self.records_of(&tile)
+                    .map(|r| (tile.generation, r))
+                    .map_err(|e| TileFailure::new(url, TileFailureKind::Decode, None, e.into())),
+            );
         }
         let prepared = xrpc::prepare_url(url);
-        if xrpc::is_http_url(&prepared) { TileStep::Fetch(prepared) } else { TileStep::Failed }
+        if xrpc::is_http_url(&prepared) {
+            TileStep::Fetch(prepared)
+        } else {
+            TileStep::Done(Err(TileFailure::new(url, TileFailureKind::Refused, None, Error::Transport(REFUSED.into()))))
+        }
     }
 
-    /// Reads a tile and caches it; any failure is a failed tile, never an error.
+    /// Reads a tile and caches it. What the transport, the status check and decoding fail with is a failed
+    /// tile, never an error; the cache insert after them is not guarded, and cannot fail (§4.4).
     pub(crate) fn accept_tile(&self, url: &str, response: Result<HttpResponse, BoxError>) -> Slot {
-        let response = response.ok()?;
+        let fail = |kind, status, error| TileFailure::new(url, kind, status, error);
+        let response = response.map_err(|e| fail(TileFailureKind::Transport, None, Error::Transport(e)))?;
         if !(200..300).contains(&response.status) {
-            return None;
+            let error = Error::Atgeo(wire::error_from(response.status, &response.body));
+            return Err(fail(TileFailureKind::Status, Some(response.status), error));
         }
-        let records: Arc<[TileRecord]> = wire::tile_records(&response.body)?.into();
+        let records: Arc<[TileRecord]> =
+            wire::tile_records(&response.body).map_err(|e| fail(TileFailureKind::Decode, None, e.into()))?.into();
         let keys = records.iter().filter_map(|r| record_key(r).map(str::to_owned)).collect();
         let generation = lock(&self.tiles).insert(url, response.body.into(), keys);
-        Some((generation, records))
+        Ok((generation, records))
+    }
+
+    /// The slots the workers finished, by index, in URL order. Every index is there once.
+    pub(crate) fn in_url_order(done: impl IntoIterator<Item = (usize, Slot)>) -> Vec<Slot> {
+        let mut done: Vec<(usize, Slot)> = done.into_iter().collect();
+        done.sort_unstable_by_key(|(i, _)| *i);
+        debug_assert!(done.iter().enumerate().all(|(n, (i, _))| n == *i));
+        done.into_iter().map(|(_, slot)| slot).collect()
     }
 
     /// Concatenates, dedupes, filters and ranks (§4.5 to §4.9), and keeps this search's parsed tiles.
     pub(crate) fn assemble(&self, plan: Plan, urls: Vec<String>, overview: bool, slots: Vec<Slot>) -> SearchResult {
-        let fetched = slots.iter().filter(|s| s.is_some()).count();
-        let failed = slots.len() - fetched;
+        debug_assert_eq!(urls.len(), slots.len());
+        let mut used: Vec<(String, Used)> = Vec::with_capacity(slots.len());
+        let mut tile_failures = Vec::new();
+        for (url, slot) in urls.into_iter().zip(slots) {
+            match slot {
+                Ok(tile) => used.push((url, tile)),
+                Err(failure) => tile_failures.push(failure),
+            }
+        }
+        let (fetched, failed) = (used.len(), tile_failures.len());
 
         let mut seen: HashSet<&str> = HashSet::new();
         let mut kept: Vec<&TileRecord> = Vec::new();
-        for (_, records) in slots.iter().flatten() {
+        for (_, (_, records)) in &used {
             for r in records.iter() {
                 // dedupe picks a winner before the region filter runs (§4.6).
                 let key = record_key(r);
@@ -270,9 +306,9 @@ impl Engine {
         }
         let places = rank(kept, center(&plan.region), plan.query.as_ref(), plan.sort);
 
-        *lock(&self.parsed) = urls.into_iter().zip(slots).filter_map(|(url, slot)| slot.map(|s| (url, s))).collect();
+        *lock(&self.parsed) = used.into_iter().collect();
 
-        SearchResult { places, complete: failed == 0, overview, tiles: TileCounts { fetched, failed } }
+        SearchResult { places, complete: failed == 0, overview, tiles: TileCounts { fetched, failed }, tile_failures }
     }
 
     // --- getPlace and the describe calls --------------------------------------------------------
@@ -282,7 +318,7 @@ impl Engine {
         self.check_server()?;
         let found = lock(&self.tiles).find(origin);
         if let Some(tile) = found {
-            if let Some(records) = self.records_of(&tile) {
+            if let Ok(records) = self.records_of(&tile) {
                 if let Some(r) = records.iter().find(|r| record_key(r) == Some(origin)) {
                     return Ok(Step::Done(PlaceRecord {
                         origin: origin.to_owned(),
@@ -347,13 +383,13 @@ mod tests {
         let e = Engine::default();
         let (g1, first) = e.accept_tile("https://t/a", ok(TILE)).unwrap();
         *lock(&e.parsed) = HashMap::from([("https://t/a".to_owned(), (g1, first.clone()))]);
-        let TileStep::Cached(Some((g, again))) = e.tile_step("https://t/a") else { panic!() };
+        let TileStep::Done(Ok((g, again))) = e.tile_step("https://t/a") else { panic!() };
         assert_eq!(g, g1);
         assert!(Arc::ptr_eq(&first, &again), "the memo answers while the generation matches");
 
         let (g2, _) = e.accept_tile("https://t/a", ok(TILE)).unwrap();
         assert_ne!(g1, g2);
-        let TileStep::Cached(Some((g, reparsed))) = e.tile_step("https://t/a") else { panic!() };
+        let TileStep::Done(Ok((g, reparsed))) = e.tile_step("https://t/a") else { panic!() };
         assert_eq!(g, g2);
         assert!(!Arc::ptr_eq(&first, &reparsed), "a replaced entry is parsed again");
         assert_eq!(first, reparsed);
@@ -363,10 +399,30 @@ mod tests {
     fn a_tile_url_that_is_not_http_fails_without_a_request() {
         let e = Engine::default();
         for url in ["tiles/a.json", "file:///etc/passwd", "ftp://h/a", ""] {
-            assert!(matches!(e.tile_step(url), TileStep::Failed), "{url:?}");
+            let TileStep::Done(Err(f)) = e.tile_step(url) else { panic!("{url:?}") };
+            assert_eq!((f.url.as_str(), f.kind, f.status), (url, TileFailureKind::Refused, None));
+            assert!(matches!(f.error.as_deref(), Some(Error::Transport(_))));
         }
         let TileStep::Fetch(u) = e.tile_step("https://h/a b.json") else { panic!() };
         assert_eq!(u, "https://h/a%20b.json");
+    }
+
+    #[test]
+    fn a_cached_tile_that_fails_to_parse_again_is_a_decode_failure() {
+        let e = Engine::default();
+        lock(&e.tiles).insert("https://t/a", b"not json".to_vec().into(), HashSet::new());
+        let TileStep::Done(Err(f)) = e.tile_step("https://t/a") else { panic!() };
+        assert_eq!((f.url.as_str(), f.kind, f.status), ("https://t/a", TileFailureKind::Decode, None));
+        assert!(matches!(f.error.as_deref(), Some(Error::Decoding(_))));
+    }
+
+    #[test]
+    fn puts_finished_slots_in_url_order() {
+        let failure =
+            |u: &str| Err(TileFailure::new(u, TileFailureKind::Transport, None, Error::Transport("x".into())));
+        let slots = Engine::in_url_order([(2, failure("c")), (0, failure("a")), (1, failure("b"))]);
+        let urls: Vec<_> = slots.iter().map(|s| s.as_ref().unwrap_err().url.as_str()).collect();
+        assert_eq!(urls, ["a", "b", "c"]);
     }
 
     #[test]

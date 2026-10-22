@@ -4,7 +4,7 @@
 #[macro_use]
 mod common;
 
-use atgeo::{Error, SearchOptions};
+use atgeo::{Error, SearchOptions, TileFailureKind};
 use common::*;
 
 const LIST: &str = "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&collection=place&bbox=-122.42%2C37.77%2C-122.41%2C37.78";
@@ -83,9 +83,24 @@ mod tiles {
 
     both! {
         fn fails_a_tile_whose_body_is_unusable_and_carries_on(kind: Kind) {
-            for body in ["not json", "null", "[]", "{}", r#"{"records":{}}"#, r#"{"records":"x"}"#, "1e400"] {
+            // Nesting past serde_json's recursion limit is a parse error, not a stack overflow (contract §4.4).
+            let deep = format!(r#"{{"records":[{{"value":{}1{}}}]}}"#, "[".repeat(100_000), "]".repeat(100_000));
+            for body in ["not json", "null", "[]", "{}", r#"{"records":{}}"#, r#"{"records":"x"}"#, "1e400", deep.as_str()] {
                 let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
                 assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (0, 1, false), "{body:?}");
+                let [failure] = &result.tile_failures[..] else { panic!("{:?}", result.tile_failures) };
+                assert_eq!((failure.url.as_str(), failure.kind, failure.status), (TILE, TileFailureKind::Decode, None));
+                match failure.error.as_deref() {
+                    Some(Error::Decoding(e)) => {
+                        let expected = match body {
+                            "null" | "[]" => "tile is not an object",
+                            "{}" | r#"{"records":{}}"# | r#"{"records":"x"}"# => "tile has no records array",
+                            _ => "response is not JSON",
+                        };
+                        assert_eq!(e.message(), expected, "{body:?}");
+                    }
+                    other => panic!("{body:?}: {other:?}"),
+                }
             }
         }
     }
@@ -95,6 +110,7 @@ mod tiles {
             for body in [r#"{"records":[]}"#, r#"{"records":[null, 1, {"value": 2}]}"#] {
                 let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
                 assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 0, true), "{body}");
+                assert!(result.tile_failures.is_empty(), "{body}");
             }
         }
     }

@@ -112,24 +112,26 @@ pub(crate) fn tile_list(body: &[u8]) -> Result<TileList, DecodingError> {
     })
 }
 
-/// A tile's usable records; `None` for a body that is not a JSON object with a `records` array.
-pub(crate) fn tile_records(body: &[u8]) -> Option<Vec<TileRecord>> {
-    let Ok(Value::Object(mut payload)) = parse_body(body) else { return None };
-    let Some(Value::Array(records)) = payload.remove("records") else { return None };
-    Some(
-        records
-            .into_iter()
-            .filter_map(|r| {
-                let Value::Object(mut r) = r else { return None };
-                let Some(Value::Object(value)) = r.remove("value") else { return None };
-                let uri = match r.get("uri") {
-                    Some(Value::String(s)) => Some(s.clone()),
-                    _ => None,
-                };
-                Some(TileRecord { value: Arc::new(value), uri, importance: importance_of(r.get("importance")) })
-            })
-            .collect(),
-    )
+/// A tile's usable records; a `DecodingError` for a body that is not a JSON object with a `records` array.
+pub(crate) fn tile_records(body: &[u8]) -> Result<Vec<TileRecord>, DecodingError> {
+    let Value::Object(mut payload) = parse_body(body).map_err(DecodingError::json)? else {
+        return Err(DecodingError::shape("tile is not an object"));
+    };
+    let Some(Value::Array(records)) = payload.remove("records") else {
+        return Err(DecodingError::shape("tile has no records array"));
+    };
+    Ok(records
+        .into_iter()
+        .filter_map(|r| {
+            let Value::Object(mut r) = r else { return None };
+            let Some(Value::Object(value)) = r.remove("value") else { return None };
+            let uri = match r.get("uri") {
+                Some(Value::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            Some(TileRecord { value: Arc::new(value), uri, importance: importance_of(r.get("importance")) })
+        })
+        .collect())
 }
 
 /// A getPlace body: its `record` object and `importance`.
@@ -335,7 +337,7 @@ mod tests {
         assert_eq!((records[1].uri.as_deref(), records[1].importance), (None, None));
         assert_eq!(tile_records(br#"{"records":[]}"#).unwrap().len(), 0);
         for body in [&b"{}"[..], b"[]", br#"{"records":{}}"#, b"null", b"x"] {
-            assert!(tile_records(body).is_none());
+            assert!(tile_records(body).is_err());
         }
     }
 

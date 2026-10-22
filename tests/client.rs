@@ -3,7 +3,7 @@
 #[macro_use]
 mod common;
 
-use atgeo::{ArgumentError, Error, Region, SearchOptions, SortMode};
+use atgeo::{ArgumentError, Error, Region, SearchOptions, SortMode, TileFailureKind};
 use common::*;
 
 // describe("getPlace")
@@ -474,6 +474,18 @@ mod urls {
             let result = kind.client(&fake).ok(REGION, SearchOptions::new());
             assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
+            // In URL order, each as the tile list gave it, refused without a request.
+            let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.as_str(), f.kind, f.status)).collect();
+            assert_eq!(
+                failures,
+                [
+                    ("file:///etc/passwd", TileFailureKind::Refused, None),
+                    ("tiles.example/b.json", TileFailureKind::Refused, None),
+                ]
+            );
+            for f in &result.tile_failures {
+                assert!(matches!(f.error.as_deref(), Some(Error::Transport(_))), "{f:?}");
+            }
             assert!(fake.requests().iter().all(|r| r.starts_with("https://")), "{:?}", fake.requests());
         }
     }
@@ -494,6 +506,20 @@ mod urls {
             let result = kind.client(&fake).ok(REGION, SearchOptions::new());
             assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
             assert!(fake.requests().iter().all(|r| !r.contains('@')), "{:?}", fake.requests());
+            let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.as_str(), f.kind, f.status)).collect();
+            assert_eq!(
+                failures,
+                [
+                    ("https://user:pw@tiles.example/a.json", TileFailureKind::Refused, None),
+                    ("https://user@tiles.example/a.json", TileFailureKind::Refused, None),
+                ]
+            );
+            // The error does not repeat the URL, and so not its credentials.
+            for f in &result.tile_failures {
+                let error = f.error.as_deref().unwrap();
+                let source = std::error::Error::source(error).unwrap().to_string();
+                assert!(!source.contains("pw") && !source.contains('@'), "{source}");
+            }
         }
     }
 
@@ -505,6 +531,9 @@ mod urls {
             let result = kind.client(&fake).ok(REGION, SearchOptions::new());
             assert!(fake.requests().contains(&"https://tiles.example/a%20b.json".to_owned()), "{:?}", fake.requests());
             assert_eq!(result.tiles.failed, 1); // the fake has no such tile: a 404
+            // Reported by the URL as the tile list gave it, not as prepared.
+            assert_eq!(result.tile_failures[0].url, "https://tiles.example/a b\t.json");
+            assert_eq!((result.tile_failures[0].kind, result.tile_failures[0].status), (TileFailureKind::Status, Some(404)));
         }
     }
 

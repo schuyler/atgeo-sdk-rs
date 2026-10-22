@@ -4,7 +4,9 @@
 #[macro_use]
 mod common;
 
-use atgeo::{Error, Region, SearchOptions};
+use std::time::Duration;
+
+use atgeo::{Error, Region, SearchOptions, SearchResult, TileFailureKind};
 use common::*;
 
 fn two_tiles(fail_tiles: &[&str]) -> FakeServer {
@@ -17,6 +19,16 @@ fn two_tiles(fail_tiles: &[&str]) -> FakeServer {
         .build()
 }
 
+/// Each failed tile's URL, kind and status, in the order the result gives them.
+fn failures(result: &SearchResult) -> Vec<(String, TileFailureKind, Option<u16>)> {
+    result.tile_failures.iter().map(|f| (f.url.clone(), f.kind, f.status)).collect()
+}
+
+/// The error a failed tile carries; every failure a search reports has one.
+fn error_of(result: &SearchResult, i: usize) -> &Error {
+    result.tile_failures[i].error.as_deref().expect("a reported failure carries its error")
+}
+
 // describe("failed tiles")
 mod failed_tiles {
     use super::*;
@@ -26,6 +38,7 @@ mod failed_tiles {
             let result = kind.client(&two_tiles(&[])).ok(REGION, SearchOptions::new());
             assert!(result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (2, 0));
+            assert!(result.tile_failures.is_empty());
         }
     }
 
@@ -35,6 +48,11 @@ mod failed_tiles {
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 1));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
+            assert_eq!(failures(&result), [(url("b"), TileFailureKind::Status, Some(500))]);
+            match error_of(&result, 0) {
+                Error::Atgeo(e) => assert_eq!((e.status, e.code.as_str()), (500, "HttpError")),
+                other => panic!("{other:?}"),
+            }
         }
     }
 
@@ -46,6 +64,15 @@ mod failed_tiles {
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 1));
             assert_eq!(origins(&result), [Some(place_origin("b"))]);
+            assert_eq!(failures(&result), [(url("a"), TileFailureKind::Transport, None)]);
+            // The transport's own error, unwrapped from nothing but the crate's Error::Transport.
+            match error_of(&result, 0) {
+                Error::Transport(e) => {
+                    let io = e.downcast_ref::<std::io::Error>().expect("the fake's io::Error");
+                    assert_eq!(io.to_string(), "network disabled");
+                }
+                other => panic!("{other:?}"),
+            }
         }
     }
 
@@ -63,6 +90,57 @@ mod failed_tiles {
             assert!(result.places.is_empty());
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 2));
+            assert_eq!(result.tile_failures.len(), 2);
+        }
+    }
+
+    both! {
+        fn reports_failures_in_url_order_not_completion_order(kind: Kind) {
+            let here = |id: &str| vec![rec(simple(id, id, vec![point(37.772, -122.412)]))];
+            let fake = FakeServer::builder()
+                .fail_tiles(&[&url("e")])
+                .tilesets(vec![overture(vec![
+                    tile(&url("a"), here("a")),
+                    tile(&url("c"), here("c")),
+                    tile(&url("d"), here("d")),
+                    tile(&url("e"), here("e")),
+                ])])
+                .tiles_for(|_| {
+                    let mut urls: Vec<String> = ["e", "d", "c", "a"].iter().map(|n| url(n)).collect();
+                    urls.push("ftp://tiles.example/b.json".into());
+                    TilesFor::Urls(urls)
+                })
+                .build();
+            fake.network_error(&url("c"));
+            fake.raw(&url("d"), 200, "not json");
+            // The decode failure finishes after the status failure that follows it in URL order.
+            fake.delay(&url("d"), Duration::from_millis(30));
+            fake.delay(&url("a"), Duration::from_millis(20));
+            fake.delay(&url("e"), Duration::from_millis(10));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            assert_eq!(
+                failures(&result),
+                [
+                    ("ftp://tiles.example/b.json".to_owned(), TileFailureKind::Refused, None),
+                    (url("c"), TileFailureKind::Transport, None),
+                    (url("d"), TileFailureKind::Decode, None),
+                    (url("e"), TileFailureKind::Status, Some(500)),
+                ]
+            );
+            assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 4, false));
+            assert_eq!(origins(&result), [Some(place_origin("a"))]);
+        }
+    }
+
+    both! {
+        fn a_cached_tile_is_not_reported_and_a_failure_is_reported_again(kind: Kind) {
+            let fake = two_tiles(&[&url("b")]);
+            let client = kind.client(&fake);
+            let first = client.ok(REGION, SearchOptions::new());
+            let second = client.ok(REGION, SearchOptions::new());
+            assert_eq!(fake.count_of(&url("a")), 1, "the good tile came from the cache");
+            assert_eq!(first.tile_failures, second.tile_failures);
+            assert_eq!(failures(&second), [(url("b"), TileFailureKind::Status, Some(500))]);
         }
     }
 }

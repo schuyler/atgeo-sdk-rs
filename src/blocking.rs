@@ -105,8 +105,7 @@ impl<T: HttpTransport> AtgeoClient<T> {
 
     fn tile(&self, url: &str) -> Slot {
         match self.engine.tile_step(url) {
-            TileStep::Cached(slot) => slot,
-            TileStep::Failed => None,
+            TileStep::Done(slot) => slot,
             TileStep::Fetch(prepared) => self.engine.accept_tile(url, self.transport.get(&prepared)),
         }
     }
@@ -146,11 +145,7 @@ impl<T: HttpTransport> AtgeoClient<T> {
             let handles: Vec<_> = (0..n.min(MAX_TILES_IN_FLIGHT)).map(|_| s.spawn(worker)).collect();
             handles.into_iter().map(joined).collect()
         });
-        let mut slots: Vec<Slot> = vec![None; n];
-        for (i, slot) in finished.into_iter().flatten() {
-            slots[i] = slot;
-        }
-        Ok(self.engine.assemble(plan, urls, overview, slots))
+        Ok(self.engine.assemble(plan, urls, overview, Engine::in_url_order(finished.into_iter().flatten())))
     }
 
     /// One place by its origin; see the async [`crate::AtgeoClient::get_place`].

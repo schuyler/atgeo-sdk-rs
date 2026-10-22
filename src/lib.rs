@@ -28,7 +28,7 @@ pub use transport::{BoxError, HttpResponse, HttpTransport};
 pub use types::{
     CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, Place, PlaceBox, PlaceLocation,
     PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset, ServiceDescription,
-    SortMode, TileCounts, Tileset,
+    SortMode, TileCounts, TileFailure, TileFailureKind, Tileset,
 };
 
 /// The server a client talks to unless told otherwise.
