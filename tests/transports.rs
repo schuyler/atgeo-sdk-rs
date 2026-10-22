@@ -226,7 +226,8 @@ fn routes(r: &Request, s: &mut TcpStream) {
             let host = r.header("host").unwrap_or("");
             if r.path().contains("dataset=userinfo") {
                 // A backslash before an `@`: WHATWG ends the authority at the backslash, so the host is `h`;
-                // a parser that does not would read userinfo `h\%FF` and send it to this server.
+                // a parser that does not would read userinfo `h\%FF` and send it to this server. The client
+                // refuses both.
                 let tiles = format!(r#"["http://h\\%FF@{host}/t/a.json","http://h\\@{host}/t/b.json"]"#);
                 respond(s, 200, &json, format!(r#"{{"tiles":{tiles}}}"#).as_bytes());
             } else if r.path().contains("dataset=failing") {
@@ -265,12 +266,12 @@ fn assert_request_headers(requests: &[Request]) {
     assert_eq!(a.header("referer"), None);
 }
 
-/// A search whose tile URLs put a backslash before an `@` fails both tiles without sending anything to the
-/// host after the `@`, and so no `Authorization` header to it either.
+/// A search whose tile URLs put a backslash before an `@` refuses both tiles without a request, so nothing
+/// reaches the host after the `@`, and no `Authorization` header either.
 fn assert_userinfo_behind_a_backslash_is_not_sent(server: &Server, result: &atgeo::SearchResult) {
     assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 2), "{:?}", result.tile_failures);
     for f in &result.tile_failures {
-        assert!(matches!(f.kind, atgeo::TileFailureKind::Refused | atgeo::TileFailureKind::Transport), "{f:?}");
+        assert_eq!((f.kind, f.status), (atgeo::TileFailureKind::Refused, None), "{f:?}");
     }
     let requests = server.requests();
     assert!(requests.iter().all(|r| r.header("authorization").is_none()), "{requests:?}");

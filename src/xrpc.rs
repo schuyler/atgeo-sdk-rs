@@ -53,12 +53,15 @@ pub(crate) fn is_http_url(url: &str) -> bool {
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
         return false;
     }
-    // WHATWG ends a special URL's authority at a backslash too: `https://h\\@x/y` is host `h`, path `/@x/y`.
-    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
-    // Any `@` is refused, an empty userinfo (`https://@h/x`) included, which `fetch` drops; CONFORMANCE.md.
-    if authority.contains('@') {
+    // Any `@` before the first `/`, `?` or `#` is refused, scanning past a backslash: an empty userinfo
+    // (`https://@h/x`), which `fetch` drops, and `https://h\\@x/y`, which WHATWG reads as host `h` but a
+    // parser that does not end the authority at a backslash (an app's transport, say) reads as userinfo
+    // `h\\` at host `x`. Both are margins of contract §4.4; CONFORMANCE.md.
+    if rest.split(['/', '?', '#']).next().unwrap_or("").contains('@') {
         return false;
     }
+    // WHATWG ends a special URL's authority at a backslash too: `https://h\\x/y` is host `h`, path `/x/y`.
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
     let host = match authority.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or(""),
         None => authority.split(':').next().unwrap_or(""),
@@ -179,7 +182,7 @@ mod tests {
     #[test]
     fn recognizes_http_urls() {
         for ok in
-            ["https://h", "HTTP://h/x", "http://h:80/x@y", "http://[::1]:8000/x", "https://h?q", "https://h\\@x/y"]
+            ["https://h", "HTTP://h/x", "http://h:80/x@y", "http://[::1]:8000/x", "https://h?q", "https://h\\x/y@z"]
         {
             assert!(is_http_url(ok), "{ok}");
         }
@@ -187,6 +190,13 @@ mod tests {
             ["", "h/x", "/x", "ftp://h/x", "file:///etc/passwd", "https:///x", "https://", "http://u@/x", "https:h"]
                 .into_iter()
                 .chain(["http://u:p@h:80/x", "https://u@h/x", "https://:p@h", "https://@h/x", "https://u:p@[::1]/x"])
+                .chain([
+                    "https://h\\@x/y",
+                    "https://h\\%FF@x/y",
+                    "http://h\\a\\@x",
+                    "https://h\\@x?q",
+                    "https://h\\u:p@x#f",
+                ])
         {
             assert!(!is_http_url(bad), "{bad}");
         }
