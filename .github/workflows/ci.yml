@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # cargo doc builds the README's examples but does not run them; this compiles them as doctests.
+      - run: cargo test --doc --all-features
+
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.features }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        features:
+          - --no-default-features
+          - --features reqwest
+          - --no-default-features --features blocking
+          - --all-features
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --lib --tests ${{ matrix.features }}
+
+  # The floor in Cargo.toml, on the committed lockfile.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --lib --tests --all-features --locked
+
+  # An app resolves its own lockfile. This builds an edition-2021 app on 1.85 the way the README tells one to,
+  # with resolver 3, so that a newer icu_* that needs 1.88 is not picked (spec section 2).
+  msrv-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: atgeo
+      - uses: dtolnay/rust-toolchain@1.85
+      - name: Build an edition-2021 app that depends on the crate
+        run: |
+          cargo new --edition 2021 app
+          cd app
+          sed -i '/^\[package\]/a resolver = "3"' Cargo.toml
+          cat >> Cargo.toml <<'EOF'
+          atgeo = { path = "../atgeo", features = ["ureq"] }
+          EOF
+          cat > src/main.rs <<'EOF'
+          fn main() {
+              let _async = atgeo::AtgeoClient::new();
+              let _blocking = atgeo::blocking::AtgeoClient::new();
+          }
+          EOF
+          cargo build
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
