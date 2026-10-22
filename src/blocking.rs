@@ -182,7 +182,7 @@ pub use self::ureq_transport::UreqTransport;
 #[cfg(feature = "ureq")]
 mod ureq_transport {
     use std::io::{BufRead, BufReader, Read};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use ureq::Agent;
     use ureq::config::ConfigBuilder;
@@ -249,10 +249,10 @@ mod ureq_transport {
                 .headers()
                 .get("content-encoding")
                 .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| v.trim().eq_ignore_ascii_case("gzip"));
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("gzip") || v.trim().eq_ignore_ascii_case("x-gzip"));
             let mut reader = BufReader::with_capacity(BUFFER, response.into_body().into_reader());
             let body = if gzip && !reader.fill_buf()?.is_empty() {
-                read_capped(flate2::bufread::GzDecoder::new(reader), self.max_body_bytes)?
+                read_capped(flate2::bufread::MultiGzDecoder::new(reader), self.max_body_bytes)?
             } else {
                 read_capped(reader, self.max_body_bytes)?
             };
@@ -287,14 +287,25 @@ mod ureq_transport {
     impl HttpTransport for UreqTransport {
         fn get(&self, url: &str) -> Result<HttpResponse, BoxError> {
             let mut current = url.to_owned();
+            // The agent's total timeout covers the whole chain of redirects, not each hop.
+            let deadline = self.agent.config().timeouts().global.map(|total| Instant::now() + total);
             for _ in 0..=MAX_REDIRECTS {
-                let response = self
+                let request = self
                     .agent
                     .get(&current)
                     .header("Accept", "application/json")
                     .header("Accept-Encoding", "gzip")
-                    .header("User-Agent", USER_AGENT)
-                    .call()?;
+                    .header("User-Agent", USER_AGENT);
+                let response = match deadline {
+                    Some(deadline) => {
+                        let left = deadline.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Err("timed out following redirects".into());
+                        }
+                        request.config().timeout_global(Some(left)).build().call()?
+                    }
+                    None => request.call()?,
+                };
                 let redirect = matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308);
                 let location = response.headers().get("location").and_then(|v| v.to_str().ok());
                 match location {

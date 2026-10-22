@@ -26,14 +26,16 @@ pub(crate) fn strip_server(server: &str) -> String {
 }
 
 /// Prepares a URL the way WHATWG URL parsing treats these characters: leading and trailing C0 controls
-/// and spaces trimmed, tab, LF and CR dropped, space, other controls and non-ASCII percent-encoded, and
-/// `%XX` left alone. A clean URL is unchanged.
+/// and spaces trimmed, tab, LF and CR dropped, and space, other controls, non-ASCII and `" < > ` { }`
+/// percent-encoded, with `%XX` left alone. A clean URL is unchanged. (WHATWG leaves `` ` ``, `{` and `}`
+/// raw in a query; encoded, they decode to the same value.)
 pub(crate) fn prepare_url(url: &str) -> String {
     let url = url.trim_matches(|c: char| c <= ' ');
     let mut out = String::with_capacity(url.len());
     for &b in url.as_bytes() {
         match b {
             b'\t' | b'\n' | b'\r' => {}
+            b'"' | b'<' | b'>' | b'`' | b'{' | b'}' => out.push_str(&format!("%{b:02X}")),
             0x21..=0x7E => out.push(b as char),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -56,26 +58,25 @@ pub(crate) fn is_http_url(url: &str) -> bool {
     !host.is_empty()
 }
 
-/// Resolves a redirect's `Location` against the URL that answered with it. Dot segments are not removed.
+/// Resolves a redirect's `Location` against the URL that answered with it, removing dot segments
+/// (RFC 3986 §5.2), as reqwest and the reference resolve it.
 #[cfg(feature = "ureq")]
 pub(crate) fn resolve(base: &str, location: &str) -> String {
     let location = location.trim();
-    let has_scheme = location
-        .split_once(':')
-        .is_some_and(|(s, _)| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b)))
-        && location.as_bytes()[0].is_ascii_alphabetic();
-    if has_scheme {
-        return location.to_owned();
-    }
+    let has_scheme = location.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+        && location
+            .split_once(':')
+            .is_some_and(|(s, _)| s.bytes().all(|b| b.is_ascii_alphanumeric() || b"+-.".contains(&b)));
     let (scheme, rest) = base.split_once("://").unwrap_or(("http", base));
-    if let Some(net) = location.strip_prefix("//") {
-        return format!("{scheme}://{net}");
-    }
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let origin = &base[..scheme.len() + 3 + authority_end];
     let path_and_query = &rest[authority_end..];
     let path = &path_and_query[..path_and_query.find(['?', '#']).unwrap_or(path_and_query.len())];
-    if location.starts_with('/') {
+    let resolved = if has_scheme {
+        location.to_owned()
+    } else if let Some(net) = location.strip_prefix("//") {
+        format!("{scheme}://{net}")
+    } else if location.starts_with('/') {
         format!("{origin}{location}")
     } else if location.starts_with('?') {
         format!("{origin}{path}{location}")
@@ -86,7 +87,37 @@ pub(crate) fn resolve(base: &str, location: &str) -> String {
         let dir = &path[..path.rfind('/').map_or(0, |i| i + 1)];
         let dir = if dir.is_empty() { "/" } else { dir };
         format!("{origin}{dir}{location}")
+    };
+    without_dot_segments(&resolved)
+}
+
+/// The URL with `.` and `..` segments removed from its path.
+#[cfg(feature = "ureq")]
+fn without_dot_segments(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_owned() };
+    let Some(path_start) = rest.find('/') else { return url.to_owned() };
+    let after_path = rest.find(['?', '#']).unwrap_or(rest.len());
+    if after_path < path_start {
+        return url.to_owned();
     }
+    let path = &rest[path_start..after_path];
+    let segments: Vec<&str> = path.split('/').skip(1).collect();
+    let mut out: Vec<&str> = Vec::new();
+    for (i, segment) in segments.iter().enumerate() {
+        let last = i == segments.len() - 1;
+        match *segment {
+            "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+        // A path ending in a dot segment ends in a slash.
+        if last && matches!(*segment, "." | "..") {
+            out.push("");
+        }
+    }
+    format!("{scheme}://{}/{}{}", &rest[..path_start], out.join("/"), &rest[after_path..])
 }
 
 #[cfg(test)]
@@ -121,6 +152,7 @@ mod tests {
         assert_eq!(prepare_url("https://h/a\tb\nc\rd"), "https://h/abcd");
         assert_eq!(prepare_url("  https://h/x \u{1}"), "https://h/x");
         assert_eq!(prepare_url("https://h/a\u{7F}%20"), "https://h/a%7F%20");
+        assert_eq!(prepare_url("https://h/a<b>{c}\"d`e"), "https://h/a%3Cb%3E%7Bc%7D%22d%60e");
         let clean = "https://places.atgeo.org/tiles/a.json?x=1%2C2#f";
         assert_eq!(prepare_url(clean), clean);
     }
@@ -149,5 +181,12 @@ mod tests {
         assert_eq!(resolve(base, "?z"), "https://h:8/a/b/c.json?z");
         assert_eq!(resolve("https://h", "d"), "https://h/d");
         assert_eq!(resolve("https://h?q", "/p"), "https://h/p");
+        assert_eq!(resolve(base, "sub/../ok?x=1"), "https://h:8/a/b/ok?x=1");
+        assert_eq!(resolve(base, "../../../../x"), "https://h:8/x");
+        assert_eq!(resolve(base, "./"), "https://h:8/a/b/");
+        assert_eq!(resolve(base, ".."), "https://h:8/a/");
+        assert_eq!(resolve(base, "/p/./q/../r#f"), "https://h:8/p/r#f");
+        assert_eq!(resolve(base, "http://o/a/../b?c=../d"), "http://o/b?c=../d");
+        assert_eq!(resolve(base, "http://o"), "http://o");
     }
 }

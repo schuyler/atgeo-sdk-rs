@@ -126,7 +126,10 @@ impl<T: Clone> TtlCache<T> {
     /// bound.
     pub(crate) fn set(&mut self, key: &str, value: T, now: SystemTime) {
         self.entries.retain(|_, (_, expires)| now < *expires);
-        self.entries.insert(key.to_owned(), (value, now + TTL));
+        // A clock within an hour of the end of time caches nothing, rather than overflowing.
+        if let Some(expires) = now.checked_add(TTL) {
+            self.entries.insert(key.to_owned(), (value, expires));
+        }
     }
 
     #[cfg(test)]

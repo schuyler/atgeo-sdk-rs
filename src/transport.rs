@@ -72,7 +72,7 @@ pub use self::reqwest_transport::ReqwestTransport;
 mod reqwest_transport {
     use std::time::Duration;
 
-    use reqwest::header::{ACCEPT, HeaderValue, USER_AGENT};
+    use reqwest::header::{ACCEPT, HeaderValue, LOCATION, USER_AGENT};
 
     use super::{BoxError, DEFAULT_MAX_BODY_BYTES, HttpResponse, HttpTransport};
 
@@ -135,6 +135,11 @@ mod reqwest_transport {
                 .send()
                 .await?;
             let status = response.status().as_u16();
+            // reqwest hands back a redirect it would not follow (to a scheme other than http or https); no
+            // response arrived from where it pointed, so that is a failure, as it is in ureq and in fetch.
+            if matches!(status, 301 | 302 | 303 | 307 | 308) && response.headers().contains_key(LOCATION) {
+                return Err(format!("redirect not followed from {}", response.url()).into());
+            }
             // Count decoded bytes as they arrive; Response::bytes() would hold the whole body first.
             let mut body = Vec::new();
             while let Some(chunk) = response.chunk().await? {

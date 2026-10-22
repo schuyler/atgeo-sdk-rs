@@ -2,8 +2,11 @@
 //! the caller's future, and dropping that future cancels every request in it.
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::SystemTime;
 
 use futures_util::future::{join_all, try_join_all};
@@ -142,7 +145,13 @@ impl<T: HttpTransport> AtgeoClient<T> {
         match self.engine.tile_step(url) {
             TileStep::Cached(slot) => slot,
             TileStep::Failed => None,
-            TileStep::Fetch(prepared) => self.engine.accept_tile(url, self.transport.get(&prepared).await),
+            TileStep::Fetch(prepared) => {
+                // Let the other workers look up their URLs before this one can store a tile, as the reference's
+                // do: a transport that answers on its first poll would otherwise store, and evict, before the
+                // first wave's lookups, and change which tiles a tight budget keeps.
+                YieldOnce(false).await;
+                self.engine.accept_tile(url, self.transport.get(&prepared).await)
+            }
         }
     }
 
@@ -167,5 +176,22 @@ impl<T: HttpTransport> AtgeoClient<T> {
     pub async fn describe_tileset(&self, slug: &str) -> Result<Tileset, Error> {
         let url = self.engine.tileset_url(slug)?;
         self.engine.accept_tileset(self.transport.get(&url).await)
+    }
+}
+
+/// Pending once, waking itself straight away: one turn of whatever executor polls it.
+struct YieldOnce(bool);
+
+impl Future for YieldOnce {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.0 {
+            Poll::Ready(())
+        } else {
+            self.0 = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }
