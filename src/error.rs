@@ -17,12 +17,15 @@ pub enum Error {
     InvalidArgument(ArgumentError),
 }
 
+/// No message repeats its source's, so that a report that walks the chain (anyhow's `{:#}`, say) says each
+/// thing once: `Atgeo`, `Decoding` and `InvalidArgument` show their inner error and pass on its source, and
+/// `Transport` says only that the transport failed, with the transport's error as its source.
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Atgeo(e) => e.fmt(f),
             Error::Decoding(e) => e.fmt(f),
-            Error::Transport(e) => write!(f, "transport error: {e}"),
+            Error::Transport(_) => f.write_str("transport error"),
             Error::InvalidArgument(e) => e.fmt(f),
         }
     }
@@ -31,10 +34,10 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Atgeo(e) => Some(e),
-            Error::Decoding(e) => Some(e),
+            Error::Atgeo(e) => e.source(),
+            Error::Decoding(e) => e.source(),
             Error::Transport(e) => Some(e.as_ref()),
-            Error::InvalidArgument(e) => Some(e),
+            Error::InvalidArgument(e) => e.source(),
         }
     }
 }
@@ -93,7 +96,8 @@ pub struct DecodingError {
 
 impl DecodingError {
     pub(crate) fn json(source: serde_json::Error) -> Self {
-        DecodingError { message: format!("response is not JSON: {source}"), source: Some(source) }
+        // The parser's message is the source's, not repeated here.
+        DecodingError { message: "response is not JSON".to_owned(), source: Some(source) }
     }
 
     pub(crate) fn shape(message: &str) -> Self {
@@ -144,3 +148,42 @@ impl fmt::Display for ArgumentError {
 }
 
 impl std::error::Error for ArgumentError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The error and its sources, as a report that walks the chain prints them.
+    fn chain(e: &Error) -> Vec<String> {
+        let mut out = vec![e.to_string()];
+        let mut source = std::error::Error::source(e);
+        while let Some(s) = source {
+            out.push(s.to_string());
+            source = s.source();
+        }
+        out
+    }
+
+    #[test]
+    fn says_each_thing_once_down_the_chain() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection refused");
+        assert_eq!(chain(&Error::Transport(Box::new(io))), ["transport error", "connection refused"]);
+
+        let parse = serde_json::from_str::<serde_json::Value>("<html>").unwrap_err();
+        let parsed = parse.to_string();
+        assert_eq!(chain(&DecodingError::json(parse).into()), ["response is not JSON".to_owned(), parsed]);
+        assert_eq!(chain(&DecodingError::shape("no tiles").into()), ["no tiles"]);
+
+        let atgeo = AtgeoError::new("PlaceNotFound".into(), "no such place".into(), 404);
+        assert_eq!(chain(&atgeo.into()), ["no such place (PlaceNotFound)"]);
+        assert_eq!(chain(&ArgumentError::SimilarityRequiresText.into()), ["sort 'similarity' requires text"]);
+    }
+
+    #[test]
+    fn keeps_the_transports_error_reachable() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection refused");
+        let e = Error::Transport(Box::new(io));
+        let source = std::error::Error::source(&e).unwrap();
+        assert!(source.downcast_ref::<std::io::Error>().is_some());
+    }
+}

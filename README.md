@@ -181,6 +181,8 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 - `Error::Transport(BoxError)`: no response arrived. It holds the transport's own error, so `downcast_ref::<reqwest::Error>()` reaches it.
 - `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `min_lat > max_lat`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
 
+An error's `Display` says what went wrong at its own level and leaves the cause to `source()`, as the standard library's errors do: a transport failure displays as `transport error`, and a body that isn't JSON as `response is not JSON`, with the transport's or the parser's error as the source. To log the whole story, walk `source()`, or print it with anyhow's `{:#}`.
+
 A failed `getTiles` request fails the whole search. A failed tile does not: that tile is skipped, `tiles.failed` counts it, and `complete` is `false`.
 
 ## Transports

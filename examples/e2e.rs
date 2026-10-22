@@ -68,7 +68,16 @@ fn check(ok: bool, what: &str) -> Result<(), String> {
 
 fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result<(), String> {
     let log = |step: &str, detail: String| println!("ok  [{label}] {step}: {detail}");
-    let fail = |e: Error| e.to_string();
+    // The error and each of its sources, as anyhow's `{:#}` prints them.
+    let fail = |e: Error| {
+        let mut message = e.to_string();
+        let mut source = std::error::Error::source(&e);
+        while let Some(s) = source {
+            message = format!("{message}: {s}");
+            source = s.source();
+        }
+        message
+    };
     // With a collection set, the tileset must serve that collection, not just the dataset.
     let wanted = |dataset: Option<&str>, collection: Option<&str>| {
         dataset == Some(c.dataset.as_str()) && c.collection.as_deref().is_none_or(|want| collection == Some(want))
