@@ -41,7 +41,7 @@ The client checks and prepares every URL before a transport sees one (`src/xrpc.
 |---|---|---|
 | `` ` ``, `{` or `}` in a query | percent-encoded (a server decodes it to the same value) | sent raw |
 | `'` in a query | `ReqwestTransport` percent-encodes it, as `fetch` does; `UreqTransport` sends it raw | `%27` |
-| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given | `/`, resolved |
+| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given in the path, and fails the request for a backslash before the path (`https://h\@x/y`: `invalid uri character`) | `/`, resolved |
 | A non-ASCII host (`café.example`) | `ReqwestTransport` sends it in punycode, as `fetch` does; `UreqTransport` fails the request, since the host arrives percent-encoded rather than in punycode | punycode |
 | An empty userinfo in a tile URL (`https://@h/x`, `https://:@h/x`) | a failed tile, as in the Python port: any `@` before the host is refused. A redirect to one: `ReqwestTransport` follows it as `fetch` would, `UreqTransport` fails the request | the userinfo dropped, the URL fetched |
 | An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile | `https://h/x` |
