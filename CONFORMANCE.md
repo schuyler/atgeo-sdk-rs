@@ -11,7 +11,7 @@ Bodies are decoded as `JSON.parse(await response.text())` decodes them: invalid 
 | Input | This port | Reference (`JSON.parse`) |
 |---|---|---|
 | A lone surrogate escape (`"\uD800"`) | U+FFFD. A Rust `String` cannot hold a lone surrogate, so a body that fails to parse is parsed again with each such escape rewritten. | the lone code unit, kept |
-| A number literal that overflows a double (`1e400`) | parse error: a failed tile, or `Error::Decoding` for an XRPC call. serde_json cannot hold infinity without `arbitrary_precision`, which a library must not impose on its app. | Infinity |
+| A number literal that overflows a double (`1e400`) | parse error: a failed tile of kind `Decode`, or `Error::Decoding` for an XRPC call. serde_json cannot hold infinity without `arbitrary_precision`, which a library must not impose on its app. | Infinity |
 | Nesting deeper than 127 arrays or objects | parse error, as above (serde_json's recursion limit) | accepted |
 | Integers between 2^53 and 2^64 inside a place | kept exactly in the `serde_json::Value` (`9007199254740993` stays itself) | rounded to the nearest double. `importance` is read through a double in both, as contract §1 requires. |
 | Decimal literals of 17 or more significant digits | may round to a neighbouring double (serde_json without `float_roundtrip`) | correctly rounded. Coordinates in garganorn tiles are strings, which both parse exactly. |
@@ -41,10 +41,11 @@ The client checks and prepares every URL before a transport sees one (`src/xrpc.
 |---|---|---|
 | `` ` ``, `{` or `}` in a query | percent-encoded (a server decodes it to the same value) | sent raw |
 | `'` in a query | `ReqwestTransport` percent-encodes it, as `fetch` does; `UreqTransport` sends it raw | `%27` |
-| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given in the path, and fails the request for a backslash before the path (`https://h\@x/y`: `invalid uri character`) | `/`, resolved |
+| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given in the path, and fails the request for a backslash before the path (`https://h\x/y`: `invalid uri character`) | `/`, resolved |
+| An `@` after a backslash and before the path (`https://h\@x/y`, `https://h\%FF@x/y`) | a failed tile of kind `Refused`, with no request, as in the Kotlin, Swift and Python ports: any `@` before the first `/`, `?` or `#` is refused, scanning past a backslash, so that a transport whose parser does not end the authority at a backslash cannot read `h\` as userinfo and send it to `x` as `Authorization`. Tested against a loopback server with both transports. A margin contract §4.4 allows | fetched from host `h`, path `/@x/y`, as WHATWG reads it |
 | A non-ASCII host (`café.example`) | `ReqwestTransport` sends it in punycode, as `fetch` does; `UreqTransport` fails the request, since the host arrives percent-encoded rather than in punycode | punycode |
-| An empty userinfo in a tile URL (`https://@h/x`, `https://:@h/x`) | a failed tile, as in the Python port: any `@` before the host is refused. A redirect to one: `ReqwestTransport` follows it as `fetch` would, `UreqTransport` fails the request | the userinfo dropped, the URL fetched |
-| An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile | `https://h/x` |
+| An empty userinfo in a tile URL (`https://@h/x`, `https://:@h/x`) | a failed tile of kind `Refused`, as in the Python port: any `@` before the host is refused, the margin contract §4.4 allows, since an empty userinfo carries no credentials and a compliant server never sends one. A redirect to one: `ReqwestTransport` follows it as `fetch` would, `UreqTransport` fails the request | the userinfo dropped, the URL fetched |
+| An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile of kind `Refused` | `https://h/x` |
 | A redirect to `https:/elsewhere` (a scheme and a path, no `//`) | `ReqwestTransport` resolves it as `fetch` does; `UreqTransport` fails the request | `https://<current host>/elsewhere` when the scheme is the current URL's |
 
 A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`, and so is a redirect to a URL that carries credentials, as in the Python port. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
@@ -55,8 +56,17 @@ A redirect to anything but http or https (`file:`, say) is a transport error in 
 |---|---|---|
 | A gzip body of several members (`cat a.gz b.gz`) | `UreqTransport` decodes every member; `ReqwestTransport` returns only the first, so the tile fails to parse | every member |
 | `Content-Encoding: x-gzip` | `UreqTransport` decodes it; `ReqwestTransport` returns the gzip bytes, so the tile fails to parse | decoded |
-| A body that decodes past 32 MiB | a transport error (`max_body_bytes`), so a failed tile (contract §14) | read in full |
+| A body that decodes past 32 MiB | a transport error (`max_body_bytes`), so a failed tile of kind `Transport` (contract §4.4, §14) | read in full |
 | An empty body labelled gzip | empty, in both transports. If another crate in your app turns on ureq's `gzip` feature, ureq decodes it itself and fails it instead. | empty |
+
+## Failed tiles
+
+This port reports each failed tile in `SearchResult::tile_failures`, in URL order, as contract §4.4 says: `url`, `kind` (`TileFailureKind::Refused`, `Status`, `Decode` or `Transport`, serialized under the `serde` feature as `refused`, `status`, `decode`, `transport`), `status`, and `error`, which is left out of equality, hashing and serialization.
+
+- `error` is the crate's own `Error`: `Error::Atgeo` for `Status`, `Error::Decoding` for `Decode`, and `Error::Transport` holding the transport's error for `Transport`. For `Refused`, where no transport was called, it is an `Error::Transport` whose source is a message saying the URL was refused; the message does not repeat the URL, which can carry credentials.
+- `Refused` is the client's own check of every tile URL (see [URLs](#urls)). A URL that passes it and that a transport then fails, such as one `UreqTransport` cannot send, is `Transport`, so the same odd URL can be `Transport` in one transport and fetched in the other.
+- What counts as a failed tile is the guarded steps of §4.4: the URL check, the transport, the status check and decoding. Inserting the tile in the cache cannot fail, and a panic anywhere propagates, so nothing else can be counted as one. JSON nested deeper than serde_json's recursion limit of 128 is a parse error, so a `Decode` tile, never a stack overflow. Running out of memory aborts the process, as it does anywhere in Rust.
+- No failure is logged: the crate has no `log` or `tracing` dependency, and the result carries everything a log line would.
 
 ## Concurrency
 

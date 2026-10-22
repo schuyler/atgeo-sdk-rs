@@ -27,7 +27,7 @@ async fn main() -> Result<(), atgeo::Error> {
 }
 ```
 
-Misspellings are fine; matching is fuzzy, and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
+Misspellings are fine; matching is fuzzy, and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial; `result.tile_failures` says which and why. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
 
 The async example needs `tokio` (with its `macros` and `rt` features) in your own dependencies for `#[tokio::main]`; the crate itself doesn't depend on Tokio, though its default transport needs a Tokio runtime to run on. The blocking client, behind the `ureq` feature (below), is the same without the `.await`:
 
@@ -123,6 +123,14 @@ pub struct SearchResult {
     pub complete: bool,        // false if any tile failed to load
     pub overview: bool,        // true if the server answered with its coarse overview; see below
     pub tiles: TileCounts,     // .fetched and .failed
+    pub tile_failures: Vec<TileFailure>, // each failed tile, in URL order; empty when complete
+}
+
+pub struct TileFailure {
+    pub url: String,             // the tile URL as the server's tile list gave it
+    pub kind: TileFailureKind,   // Refused, Status, Decode or Transport
+    pub status: Option<u16>,     // the HTTP status, for Status only
+    pub error: Option<Arc<atgeo::Error>>, // what it failed with; None only when deserialized
 }
 
 pub struct SearchHit {
@@ -183,7 +191,14 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 
 An error's `Display` says what went wrong at its own level and leaves the cause to `source()`, as the standard library's errors do: a transport failure displays as `transport error`, and a body that isn't JSON as `response is not JSON`, with the transport's or the parser's error as the source. To log the whole story, walk `source()`, or print it with anyhow's `{:#}`.
 
-A failed `getTiles` request fails the whole search. A failed tile does not: that tile is skipped, `tiles.failed` counts it, and `complete` is `false`.
+A failed `getTiles` request fails the whole search. A failed tile does not: that tile is skipped, `tiles.failed` counts it, `complete` is `false`, and `tile_failures` reports it, in the order of the tile URLs rather than the order they failed in. Its `kind` says where it failed:
+
+- `Refused`: the tile URL isn't an absolute http or https URL, or it carries credentials, so no request was made. `error` is an `Error::Transport` saying so.
+- `Status`: the tile answered with a non-2xx `status`. `error` is the `Error::Atgeo` any other call would have failed with.
+- `Decode`: a 2xx whose body isn't a usable tile (not JSON, not an object, no `records` array). `error` is an `Error::Decoding`.
+- `Transport`: the transport failed, a body over `max_body_bytes` included. `error` is the `Error::Transport` holding the transport's own error.
+
+So a run of `Transport` failures points at the network or your transport, `Refused` or `Decode` at the server, and `Status` at whatever its `status` says. Two failures are equal when their `url`, `kind` and `status` are; `error` is ignored there, and under the `serde` feature it isn't serialized, so a deserialized failure has `None`. A failure carries the tile URL and what fetching it produced, never your search text, and nothing about your region beyond what the tile URL says: the server chose that tile for the snapped box, so it does reveal the coarse area searched. Nothing is logged, and nothing is sent anywhere: the result is the only place a failure goes.
 
 ## Transports
 

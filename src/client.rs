@@ -107,7 +107,8 @@ impl<T: HttpTransport> AtgeoClient<T> {
     ///
     /// Fails with `Error::InvalidArgument` for an invalid region or a similarity sort without text, before
     /// any request, and with the getTiles call's error if a tile list cannot be had. A tile that fails to
-    /// load does not fail the search: it is counted in `tiles.failed`, and `complete` is false.
+    /// load does not fail the search: it is counted in `tiles.failed` and reported, with why, in
+    /// `tile_failures`, and `complete` is false.
     pub async fn search_places(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
         let mut plan = self.engine.plan(region, &options)?;
         let steps = std::mem::take(&mut plan.lists);
@@ -134,17 +135,13 @@ impl<T: HttpTransport> AtgeoClient<T> {
                 done.push((i, self.tile(&urls[i]).await));
             }
         });
-        let mut slots: Vec<Slot> = vec![None; n];
-        for (i, slot) in join_all(workers).await.into_iter().flatten() {
-            slots[i] = slot;
-        }
+        let slots = Engine::in_url_order(join_all(workers).await.into_iter().flatten());
         Ok(self.engine.assemble(plan, urls, overview, slots))
     }
 
     async fn tile(&self, url: &str) -> Slot {
         match self.engine.tile_step(url) {
-            TileStep::Cached(slot) => slot,
-            TileStep::Failed => None,
+            TileStep::Done(slot) => slot,
             TileStep::Fetch(prepared) => {
                 // Let the other workers look up their URLs before this one can store a tile, as the reference's
                 // do: a transport that answers on its first poll would otherwise store, and evict, before the
