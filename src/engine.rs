@@ -263,17 +263,22 @@ impl Engine {
         Ok((generation, records))
     }
 
-    /// The slots the workers finished, by index, in URL order. Every index is there once.
+    /// The slots the workers finished, by index, in URL order.
+    ///
+    /// # Panics
+    ///
+    /// Unless every index from 0 is there exactly once, in release builds too: a slot attributed to the
+    /// wrong URL would report the wrong tile as failed.
     pub(crate) fn in_url_order(done: impl IntoIterator<Item = (usize, Slot)>) -> Vec<Slot> {
         let mut done: Vec<(usize, Slot)> = done.into_iter().collect();
         done.sort_unstable_by_key(|(i, _)| *i);
-        debug_assert!(done.iter().enumerate().all(|(n, (i, _))| n == *i));
+        assert!(done.iter().enumerate().all(|(n, (i, _))| n == *i), "every tile index exactly once");
         done.into_iter().map(|(_, slot)| slot).collect()
     }
 
     /// Concatenates, dedupes, filters and ranks (§4.5 to §4.9), and keeps this search's parsed tiles.
     pub(crate) fn assemble(&self, plan: Plan, urls: Vec<String>, overview: bool, slots: Vec<Slot>) -> SearchResult {
-        debug_assert_eq!(urls.len(), slots.len());
+        assert_eq!(urls.len(), slots.len(), "one slot per tile URL");
         let mut used: Vec<(String, Used)> = Vec::with_capacity(slots.len());
         let mut tile_failures = Vec::new();
         for (url, slot) in urls.into_iter().zip(slots) {
@@ -423,6 +428,14 @@ mod tests {
         let slots = Engine::in_url_order([(2, failure("c")), (0, failure("a")), (1, failure("b"))]);
         let urls: Vec<_> = slots.iter().map(|s| s.as_ref().unwrap_err().url.as_str()).collect();
         assert_eq!(urls, ["a", "b", "c"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "every tile index exactly once")]
+    fn a_missing_slot_panics_rather_than_shifting_the_rest() {
+        let failure =
+            |u: &str| Err(TileFailure::new(u, TileFailureKind::Transport, None, Error::Transport("x".into())));
+        Engine::in_url_order([(0, failure("a")), (2, failure("c"))]);
     }
 
     #[test]

@@ -97,6 +97,10 @@ impl SearchOptions {
 }
 
 /// What a search found.
+///
+/// It is `Send` and `Sync`, but not `UnwindSafe` or `RefUnwindSafe`: a [`TileFailure`]'s error can hold a
+/// transport's boxed error, which promises neither. Wrap it in `std::panic::AssertUnwindSafe` to move it
+/// into `catch_unwind`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -110,7 +114,8 @@ pub struct SearchResult {
     pub overview: bool,
     pub tiles: TileCounts,
     /// Every tile that failed, in the order of their URLs (UTF-16 code units, as the tiles were fetched),
-    /// not the order they failed in. Empty when `complete` is true; its length is `tiles.failed`.
+    /// not the order they failed in. Empty when `complete` is true; its length is `tiles.failed`, except
+    /// in a result deserialized from one serialized before this field existed, which reads as empty.
     #[cfg_attr(feature = "serde", serde(default))]
     pub tile_failures: Vec<TileFailure>,
 }
@@ -131,7 +136,9 @@ pub struct TileFailure {
     pub url: String,
     /// Where the failure arose.
     pub kind: TileFailureKind,
-    /// The HTTP status, for [`TileFailureKind::Status`]; `None` for every other kind.
+    /// The HTTP status, for [`TileFailureKind::Status`]; `None` for every other kind, and then left out
+    /// when serialized.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub status: Option<u16>,
     /// The error the tile failed with:
     ///
@@ -443,6 +450,14 @@ mod tests {
             assert_eq!(serde_json::to_value(kind).unwrap(), name);
             assert_eq!(serde_json::from_value::<TileFailureKind>(name.into()).unwrap(), kind);
         }
+
+        // A kind without a status leaves it out, and reads back as None.
+        let refused = TileFailure::new("ftp://t/a", TileFailureKind::Refused, None, Error::Transport("x".into()));
+        let json = serde_json::to_value(&refused).unwrap();
+        assert_eq!(json, serde_json::json!({ "url": "ftp://t/a", "kind": "refused" }));
+        let back: TileFailure = serde_json::from_value(json).unwrap();
+        assert_eq!((back.status, back.error.is_none()), (None, true));
+        assert_eq!(back, refused);
 
         let result = SearchResult {
             places: Vec::new(),

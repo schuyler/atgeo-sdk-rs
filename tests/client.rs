@@ -499,17 +499,20 @@ mod urls {
                     let good = good.clone();
                     move |_| {
                         let with = |userinfo: &str| good.replacen("https://", &format!("https://{userinfo}@"), 1);
-                        TilesFor::Urls(vec![with("user:pw"), with("user"), good.clone()])
+                        TilesFor::Urls(vec![with("user:pw"), with("user"), with(""), good.clone()])
                     }
                 })
                 .build();
             let result = kind.client(&fake).ok(REGION, SearchOptions::new());
-            assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
+            assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 3, false));
             assert!(fake.requests().iter().all(|r| !r.contains('@')), "{:?}", fake.requests());
             let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.as_str(), f.kind, f.status)).collect();
             assert_eq!(
                 failures,
                 [
+                    // An empty userinfo carries no credentials, but is refused too: the margin of contract
+                    // §4.4 that CONFORMANCE.md records.
+                    ("https://@tiles.example/a.json", TileFailureKind::Refused, None),
                     ("https://user:pw@tiles.example/a.json", TileFailureKind::Refused, None),
                     ("https://user@tiles.example/a.json", TileFailureKind::Refused, None),
                 ]

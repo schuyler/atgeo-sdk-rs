@@ -224,7 +224,16 @@ fn routes(r: &Request, s: &mut TcpStream) {
         // A tile list naming a tile URL with a space and a tab in it, on this same server.
         "xrpc" => {
             let host = r.header("host").unwrap_or("");
-            if r.path().contains("dataset=margins") {
+            if r.path().contains("dataset=userinfo") {
+                // A backslash before an `@`: WHATWG ends the authority at the backslash, so the host is `h`;
+                // a parser that does not would read userinfo `h\%FF` and send it to this server.
+                let tiles = format!(r#"["http://h\\%FF@{host}/t/a.json","http://h\\@{host}/t/b.json"]"#);
+                respond(s, 200, &json, format!(r#"{{"tiles":{tiles}}}"#).as_bytes());
+            } else if r.path().contains("dataset=failing") {
+                // One tile over CAP and one 404.
+                let tiles = format!(r#"["http://{host}/bytes/{}","http://{host}/json404"]"#, CAP + 1);
+                respond(s, 200, &json, format!(r#"{{"tiles":{tiles}}}"#).as_bytes());
+            } else if r.path().contains("dataset=margins") {
                 // A tile URL with a `..` segment and a backslash: the margins CONFORMANCE.md lists.
                 respond(s, 200, &json, format!(r#"{{"tiles":["http://{host}/t/x/../a\\b.json"]}}"#).as_bytes());
             } else {
@@ -254,6 +263,39 @@ fn assert_request_headers(requests: &[Request]) {
     assert_eq!(a.header("accept-encoding"), Some("gzip"));
     assert_eq!(a.header("accept-language"), None);
     assert_eq!(a.header("referer"), None);
+}
+
+/// A search whose tile URLs put a backslash before an `@` fails both tiles without sending anything to the
+/// host after the `@`, and so no `Authorization` header to it either.
+fn assert_userinfo_behind_a_backslash_is_not_sent(server: &Server, result: &atgeo::SearchResult) {
+    assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 2), "{:?}", result.tile_failures);
+    for f in &result.tile_failures {
+        assert!(matches!(f.kind, atgeo::TileFailureKind::Refused | atgeo::TileFailureKind::Transport), "{f:?}");
+    }
+    let requests = server.requests();
+    assert!(requests.iter().all(|r| r.header("authorization").is_none()), "{requests:?}");
+    assert_eq!(requests.len(), 1, "only the tile list: {requests:?}");
+}
+
+/// A search over a tile past the cap and a 404: a `Transport` failure and a `Status` one, in URL order.
+fn assert_cap_and_404_reported(server: &Server, result: &atgeo::SearchResult) {
+    use atgeo::{Error, TileFailureKind};
+    let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.clone(), f.kind, f.status)).collect();
+    assert_eq!(
+        failures,
+        [
+            (server.url(&format!("/bytes/{}", CAP + 1)), TileFailureKind::Transport, None),
+            (server.url("/json404"), TileFailureKind::Status, Some(404)),
+        ]
+    );
+    match result.tile_failures[0].error.as_deref() {
+        Some(Error::Transport(e)) => assert!(e.to_string().contains("exceeds max_body_bytes"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+    match result.tile_failures[1].error.as_deref() {
+        Some(Error::Atgeo(e)) => assert_eq!((e.status, e.code.as_str()), (404, "NotFound")),
+        other => panic!("{other:?}"),
+    }
 }
 
 /// The tile request a search sent for `http://…/t/a b\tc.json`: the space as `%20`, the tab dropped.
@@ -382,6 +424,25 @@ mod reqwest_cases {
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/a/b.json");
+    }
+
+    #[tokio::test]
+    async fn sends_no_userinfo_that_follows_a_backslash() {
+        let server = Server::start(routes);
+        let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
+        let options = SearchOptions::new().dataset("userinfo");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
+    }
+
+    #[tokio::test]
+    async fn reports_a_tile_over_the_cap_and_a_404() {
+        let server = Server::start(routes);
+        let t = transport_with(Duration::from_secs(10)).max_body_bytes(CAP);
+        let client = atgeo::AtgeoClient::with_transport(t).server(server.url(""));
+        let options = SearchOptions::new().dataset("failing");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        assert_cap_and_404_reported(&server, &result);
     }
 
     #[tokio::test]
@@ -623,6 +684,25 @@ mod ureq_cases {
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/x/../a\\b.json");
+    }
+
+    #[test]
+    fn sends_no_userinfo_that_follows_a_backslash() {
+        let server = Server::start(routes);
+        let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
+        let options = SearchOptions::new().dataset("userinfo");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
+    }
+
+    #[test]
+    fn reports_a_tile_over_the_cap_and_a_404() {
+        let server = Server::start(routes);
+        let t = transport_with(Duration::from_secs(10), Duration::from_secs(20)).max_body_bytes(CAP);
+        let client = atgeo::blocking::AtgeoClient::with_transport(t).server(server.url(""));
+        let options = SearchOptions::new().dataset("failing");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        assert_cap_and_404_reported(&server, &result);
     }
 
     #[test]
