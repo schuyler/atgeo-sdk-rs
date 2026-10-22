@@ -1,0 +1,1192 @@
+[
+  {
+    "name": "misspelling-starbux",
+    "description": "A one-letter-off brand query ranks the intended chain above near-miss names, even when those are more important.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "text": "Starbux",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:starbucks",
+          "name": "Starbucks",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762498",
+              "longitude": "-122.417125"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-bakery",
+          "name": "Star Bakery",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761149",
+              "longitude": "-122.420538"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:stardust-bar",
+          "name": "Stardust Bar",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.757552",
+              "longitude": "-122.415987"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:sterling-bank",
+          "name": "Sterling Bank",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760699",
+              "longitude": "-122.414850"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:home-depot",
+          "name": "Home Depot",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.756203",
+              "longitude": "-122.421675"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:laundromat",
+          "name": "Mission Laundromat",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760250",
+              "longitude": "-122.418831"
+            }
+          ]
+        },
+        "importance": 30
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:starbucks"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:home-depot"
+      ]
+    }
+  },
+  {
+    "name": "misspelling-chipolte",
+    "description": "A transposed-letter query ranks the intended restaurant above similar-sounding names.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "text": "Chipolte",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:chipotle",
+          "name": "Chipotle Mexican Grill",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761599",
+              "longitude": "-122.422813"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:chopt",
+          "name": "Chopt",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758901",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:chilis",
+          "name": "Chili's",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762498",
+              "longitude": "-122.415987"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:chippers",
+          "name": "Chipper's Fish & Chips",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.757102",
+              "longitude": "-122.422813"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:pharmacy",
+          "name": "Valencia Pharmacy",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760340",
+              "longitude": "-122.420310"
+            }
+          ]
+        },
+        "importance": 60
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:chipotle"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "multi-word-golden-gate",
+    "description": "A multi-word landmark query ranks the exact landmark above partial-name matches that are nearer and more important.",
+    "region": {
+      "lat": 37.81,
+      "lon": -122.46,
+      "radius": 8000
+    },
+    "text": "Golden Gate Bridge",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggb",
+          "name": "Golden Gate Bridge",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.823490",
+              "longitude": "-122.488458"
+            }
+          ]
+        },
+        "importance": 60
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggp",
+          "name": "Golden Gate Park",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.783020",
+              "longitude": "-122.471383"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggbakery",
+          "name": "Golden Gate Bakery",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.811799",
+              "longitude": "-122.456585"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:gb-cafe",
+          "name": "Golden Bridge Cafe",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.805503",
+              "longitude": "-122.454308"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:bay-bridge",
+          "name": "Bay Bridge",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.796510",
+              "longitude": "-122.403084"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:ggb"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "coffee-near-neighborhood",
+    "description": "Single-word category query returns the coffee places inside the radius and drops those outside it.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 800
+    },
+    "text": "coffee",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:blue-bottle",
+          "name": "Blue Bottle Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.764297",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:philz",
+          "name": "Philz Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.757102",
+              "longitude": "-122.417125"
+            }
+          ]
+        },
+        "importance": 30
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ritual",
+          "name": "Ritual Coffee Roasters",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760699",
+              "longitude": "-122.426225"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:coffee-bar",
+          "name": "Coffee Bar",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758001",
+              "longitude": "-122.423950"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:cheese",
+          "name": "Mission Cheese",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762498",
+              "longitude": "-122.422813"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:bank",
+          "name": "Mission Credit Union",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760250",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:far-coffee-1",
+          "name": "Coffee Movement",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.769693",
+              "longitude": "-122.417125"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:far-coffee-2",
+          "name": "Four Barrel Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.748109",
+              "longitude": "-122.422813"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 5,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:blue-bottle",
+            "urn:atgeo:overturemaps.org:place:philz",
+            "urn:atgeo:overturemaps.org:place:ritual",
+            "urn:atgeo:overturemaps.org:place:coffee-bar"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:far-coffee-1",
+        "urn:atgeo:overturemaps.org:place:far-coffee-2"
+      ]
+    }
+  },
+  {
+    "name": "accent-folding",
+    "description": "An unaccented query matches an accented name.",
+    "region": {
+      "lat": 48.854,
+      "lon": 2.3326,
+      "radius": 500
+    },
+    "text": "cafe",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:cafe-de-flore",
+          "name": "Café de Flore",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.854899",
+              "longitude": "2.333967"
+            }
+          ]
+        },
+        "importance": 30
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:blue-bottle",
+          "name": "Blue Bottle Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.854450",
+              "longitude": "2.331917"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:boulangerie",
+          "name": "Boulangerie Poilâne",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.853101",
+              "longitude": "2.335334"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:librairie",
+          "name": "Librairie Galignani",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.855799",
+              "longitude": "2.329866"
+            }
+          ]
+        },
+        "importance": 70
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:cafe-de-flore"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "variant-match",
+    "description": "A query matching only an alternate name still finds the record.",
+    "region": {
+      "bbox": [
+        11.45,
+        48.05,
+        11.7,
+        48.22
+      ]
+    },
+    "text": "Munich",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:munchen",
+          "name": "München",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.137400",
+              "longitude": "11.575500"
+            }
+          ],
+          "variants": [
+            {
+              "name": "Munich"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:kindl",
+          "name": "Münchner Kindl",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.119414",
+              "longitude": "11.588976"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:minch",
+          "name": "Minch Auto Repair",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.146393",
+              "longitude": "11.562024"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:augsburg",
+          "name": "Augsburg",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "48.159883",
+              "longitude": "11.535072"
+            }
+          ]
+        },
+        "importance": 60
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:munchen"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "chain-nearest-branch",
+    "description": "Equal chain branches order by distance.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 3000
+    },
+    "text": "Safeway",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:safeway-mid",
+          "name": "Safeway",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.751706",
+              "longitude": "-122.419400"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:safeway-far",
+          "name": "Safeway",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.773290",
+              "longitude": "-122.410300"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:safeway-near",
+          "name": "Safeway",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761599",
+              "longitude": "-122.417694"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:hardware",
+          "name": "Mission Hardware",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760699",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 50
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:safeway-near"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "no-text-landmark",
+    "description": "With no text, the most important place outranks nearer obscure ones.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 2000
+    },
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:dolores-park",
+          "name": "Mission Dolores Park",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.764297",
+              "longitude": "-122.408025"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:shop-a",
+          "name": "Valencia Laundromat",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760250",
+              "longitude": "-122.418831"
+            }
+          ]
+        },
+        "importance": 5
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:shop-b",
+          "name": "Guerrero Hardware",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758901",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 10
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:shop-c",
+          "name": "Capp Street Salon",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761149",
+              "longitude": "-122.420538"
+            }
+          ]
+        },
+        "importance": 5
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:shop-d",
+          "name": "Harrison Auto Repair",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758001",
+              "longitude": "-122.421675"
+            }
+          ]
+        },
+        "importance": 10
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 3,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:dolores-park"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "distance-mode",
+    "description": "Distance sort puts the nearest text match first and drops nearer non-matches.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1500
+    },
+    "text": "coffee",
+    "sort": "distance",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:coffee-near",
+          "name": "Coffee Bar",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762498",
+              "longitude": "-122.419400"
+            }
+          ]
+        },
+        "importance": 10
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:blue-bottle",
+          "name": "Blue Bottle Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.766995",
+              "longitude": "-122.417125"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:philz",
+          "name": "Philz Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.750807",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:laundromat",
+          "name": "Mission Laundromat",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760250",
+              "longitude": "-122.418831"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:pharmacy",
+          "name": "Valencia Pharmacy",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758901",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:coffee-near"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:laundromat",
+        "urn:atgeo:overturemaps.org:place:pharmacy"
+      ]
+    }
+  },
+  {
+    "name": "similarity-mode",
+    "description": "Similarity sort puts the exact match first even though a worse match is nearer and more important.",
+    "region": {
+      "lat": 37.81,
+      "lon": -122.46,
+      "radius": 8000
+    },
+    "text": "Golden Gate Bridge",
+    "sort": "similarity",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggb",
+          "name": "Golden Gate Bridge",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.823490",
+              "longitude": "-122.488458"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggbakery",
+          "name": "Golden Gate Bakery",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.811799",
+              "longitude": "-122.456585"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ggp",
+          "name": "Golden Gate Park",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.805503",
+              "longitude": "-122.454308"
+            }
+          ]
+        },
+        "importance": 80
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:ggb"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "no-match",
+    "description": "A query resembling nothing returns nothing.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "text": "Zxqvw",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:a",
+          "name": "Blue Bottle Coffee",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760699",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:b",
+          "name": "Safeway",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758001",
+              "longitude": "-122.418262"
+            }
+          ]
+        },
+        "importance": 80
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:c",
+          "name": "Mission Dolores Park",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762498",
+              "longitude": "-122.422813"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:d",
+          "name": "Starbucks",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758901",
+              "longitude": "-122.423950"
+            }
+          ]
+        },
+        "importance": 70
+      }
+    ],
+    "expect": {
+      "top": [],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:a",
+        "urn:atgeo:overturemaps.org:place:b",
+        "urn:atgeo:overturemaps.org:place:c",
+        "urn:atgeo:overturemaps.org:place:d"
+      ]
+    }
+  },
+  {
+    "name": "distance-containing-divisions",
+    "description": "Distance sort puts the smallest division containing the center first, then the larger ones, then a nearby division that only clips the circle, even when that one is the most important.",
+    "region": {
+      "lat": 39.95,
+      "lon": -75.16,
+      "radius": 30000
+    },
+    "sort": "distance",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:country",
+          "name": "United States",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.bbox",
+              "south": "24.500000",
+              "north": "49.400000",
+              "west": "-124.800000",
+              "east": "-66.900000"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:state",
+          "name": "Pennsylvania",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.bbox",
+              "south": "39.720000",
+              "north": "42.270000",
+              "west": "-80.520000",
+              "east": "-74.690000"
+            }
+          ]
+        },
+        "importance": 70
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:county",
+          "name": "Philadelphia County",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.bbox",
+              "south": "39.800000",
+              "north": "40.140000",
+              "west": "-75.420000",
+              "east": "-74.900000"
+            }
+          ]
+        },
+        "importance": 50
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:city",
+          "name": "Philadelphia",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.bbox",
+              "south": "39.870000",
+              "north": "40.140000",
+              "west": "-75.280000",
+              "east": "-74.960000"
+            }
+          ]
+        },
+        "importance": 30
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:neighbour",
+          "name": "Camden",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.bbox",
+              "south": "39.800000",
+              "north": "39.980000",
+              "west": "-74.900000",
+              "east": "-74.600000"
+            }
+          ]
+        },
+        "importance": 95
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:city"
+          ]
+        },
+        {
+          "k": 2,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:county"
+          ]
+        },
+        {
+          "k": 3,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:state"
+          ]
+        },
+        {
+          "k": 4,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:country"
+          ]
+        },
+        {
+          "k": 5,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:neighbour"
+          ]
+        }
+      ]
+    }
+  }
+]

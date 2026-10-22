@@ -1,0 +1,167 @@
+[
+  {
+    "a": "martha",
+    "b": "marhta",
+    "score": 0.961111
+  },
+  {
+    "a": "dixon",
+    "b": "dicksonx",
+    "score": 0.813333
+  },
+  {
+    "a": "dwayne",
+    "b": "duane",
+    "score": 0.84
+  },
+  {
+    "a": "jones",
+    "b": "johnson",
+    "score": 0.832381
+  },
+  {
+    "a": "abcvwxyz",
+    "b": "cabvwxyz",
+    "score": 0.9375
+  },
+  {
+    "a": "same",
+    "b": "same",
+    "score": 1.0
+  },
+  {
+    "a": "blue bottle",
+    "b": "blue bottle",
+    "score": 1.0
+  },
+  {
+    "a": "abc",
+    "b": "xyz",
+    "score": 0.0
+  },
+  {
+    "a": "abcd",
+    "b": "wxyz",
+    "score": 0.0
+  },
+  {
+    "a": "",
+    "b": "abc",
+    "score": 0.0
+  },
+  {
+    "a": "a",
+    "b": "a",
+    "score": 1.0
+  },
+  {
+    "a": "a",
+    "b": "b",
+    "score": 0.0
+  },
+  {
+    "a": "starbux",
+    "b": "starbucks",
+    "score": 0.904762
+  },
+  {
+    "a": "starbux",
+    "b": "star bakery",
+    "score": 0.833766
+  },
+  {
+    "a": "starbux",
+    "b": "sterling bank",
+    "score": 0.701099
+  },
+  {
+    "a": "starbux",
+    "b": "home depot",
+    "score": 0.0
+  },
+  {
+    "a": "chipolte",
+    "b": "chipotle mexican grill",
+    "score": 0.847727
+  },
+  {
+    "a": "chipolte",
+    "b": "chopt",
+    "score": 0.846667
+  },
+  {
+    "a": "munich",
+    "b": "munchen",
+    "score": 0.894444
+  },
+  {
+    "a": "golden gate bridge",
+    "b": "golden gate park",
+    "score": 0.906944
+  },
+  {
+    "a": "golden gate bridge",
+    "b": "bay bridge",
+    "score": 0.581481
+  },
+  {
+    "a": "golden",
+    "b": "gate",
+    "score": 0.65
+  },
+  {
+    "a": "cafe",
+    "b": "cafe de flore",
+    "score": 0.861538
+  },
+  {
+    "a": "cafe",
+    "b": "caffe trieste",
+    "score": 0.838462
+  },
+  {
+    "a": "coffee",
+    "b": "blue bottle coffee",
+    "score": 0.444444
+  },
+  {
+    "a": "coffee",
+    "b": "toffee shop",
+    "score": 0.762626
+  },
+  {
+    "a": "coffee",
+    "b": "coffee",
+    "score": 1.0
+  },
+  {
+    "a": "coffee",
+    "b": "toffee",
+    "score": 0.888889
+  },
+  {
+    "a": "safeway",
+    "b": "mission safeway",
+    "score": 0.473016
+  },
+  {
+    "a": "safeway",
+    "b": "safe way auto",
+    "score": 0.907692
+  },
+  {
+    "a": "zxqvw",
+    "b": "safeway",
+    "score": 0.447619
+  },
+  {
+    "a": "crate",
+    "b": "trace",
+    "score": 0.733333
+  },
+  {
+    "a": "frog",
+    "b": "fog",
+    "score": 0.925
+  }
+]

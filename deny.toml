@@ -1,0 +1,30 @@
+# cargo-deny policy: permissive licences only, no known advisories, crates from crates.io only.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+# The licences the tree uses today. CDLA-Permissive-2.0 is the Mozilla root certificate list's
+# (webpki-roots, compiled in through ureq's rustls feature).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT-0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
