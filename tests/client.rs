@@ -439,7 +439,9 @@ mod urls {
     both! {
         fn refuses_a_server_that_is_not_an_http_or_https_url_before_any_request(kind: Kind) {
             let fake = FakeServer::new();
-            for server in ["places.atgeo.org", "ftp://places.atgeo.org", "file:///tmp", "https://", "", "/xrpc"] {
+            for server in
+                ["places.atgeo.org", "ftp://places.atgeo.org", "file:///tmp", "https://", "", "/xrpc", "https://u:p@places.atgeo.org"]
+            {
                 let client = kind.with_server(&fake, server);
                 let is_invalid = |r: Result<(), Error>| matches!(r, Err(Error::InvalidArgument(ArgumentError::InvalidServer)));
                 assert!(is_invalid(client.search(REGION, SearchOptions::new()).map(drop)), "{server:?}");
@@ -473,6 +475,25 @@ mod urls {
             assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
             assert!(fake.requests().iter().all(|r| r.starts_with("https://")), "{:?}", fake.requests());
+        }
+    }
+
+    both! {
+        fn counts_a_tile_url_with_credentials_as_a_failed_tile_without_a_request(kind: Kind) {
+            let good = url("a");
+            let fake = FakeServer::builder()
+                .tilesets(vec![overture(vec![tile(&good, vec![rec(simple("a", "A", vec![point(37.772, -122.412)]))])])])
+                .tiles_for({
+                    let good = good.clone();
+                    move |_| {
+                        let with = |userinfo: &str| good.replacen("https://", &format!("https://{userinfo}@"), 1);
+                        TilesFor::Urls(vec![with("user:pw"), with("user"), good.clone()])
+                    }
+                })
+                .build();
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
+            assert!(fake.requests().iter().all(|r| !r.contains('@')), "{:?}", fake.requests());
         }
     }
 

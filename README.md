@@ -179,7 +179,7 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 - `Error::Atgeo(AtgeoError)`: the server answered with a non-2xx status. `AtgeoError` has a `code`, a `message` and the HTTP `status`, which tells a request the server refused (4xx) from one it failed to answer (5xx) without matching on codes. The code and message come from the server's JSON error body; if there isn't one, the code is `HttpError`. Apart from `HttpError`, every code comes from the server: for example `PlaceNotFound`, `TilesetNotFound`, `DatasetNotFound`, `CollectionNotFound`, `BboxTooLarge`, or `InvalidRequest`. The list is open, so report codes rather than matching on them.
 - `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `record`, a describe body that isn't an object).
 - `Error::Transport(BoxError)`: no response arrived. It holds the transport's own error, so `downcast_ref::<reqwest::Error>()` reaches it.
-- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `min_lat > max_lat`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL. All of these are found before any request.
+- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `min_lat > max_lat`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
 
 A failed `getTiles` request fails the whole search. A failed tile does not: that tile is skipped, `tiles.failed` counts it, and `complete` is `false`.
 

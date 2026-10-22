@@ -127,7 +127,7 @@ pub enum ArgumentError {
     InvalidRegion(&'static str),
     /// `SortMode::Similarity` with no text, or text that normalizes to nothing.
     SimilarityRequiresText,
-    /// The configured server is not an absolute http or https URL with a host.
+    /// The configured server is not an absolute http or https URL with a host and no credentials.
     InvalidServer,
 }
 
@@ -136,7 +136,9 @@ impl fmt::Display for ArgumentError {
         match self {
             ArgumentError::InvalidRegion(what) => f.write_str(what),
             ArgumentError::SimilarityRequiresText => f.write_str("sort 'similarity' requires text"),
-            ArgumentError::InvalidServer => f.write_str("server is not an absolute http or https URL"),
+            ArgumentError::InvalidServer => {
+                f.write_str("server is not an absolute http or https URL without credentials")
+            }
         }
     }
 }

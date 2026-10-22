@@ -195,6 +195,11 @@ fn routes(r: &Request, s: &mut TcpStream) {
         "hop" if n(3) < n(2) => respond(s, 302, &[("Location", &format!("/hop/{}/{}", n(2), n(3) + 1))], b""),
         "hop" => respond(s, 200, &[], b"end of the chain"),
         "to-file" => respond(s, 302, &[("Location", "file:///etc/passwd")], b""),
+        // Back to this server, so that only the refusal (not a failed lookup) keeps the second request away.
+        "to-credentials" => {
+            let location = format!("http://user:pw@{}/target", r.header("host").unwrap_or(""));
+            respond(s, 302, &[("Location", &location)], b"")
+        }
         // Two gzip members, as `cat a.gz b.gz` makes; the body is their concatenation.
         "gzip-multi" => {
             let mut body = gzip(&TILE_JSON[..10]);
@@ -384,6 +389,14 @@ mod reqwest_cases {
         let server = Server::start(routes);
         let error = transport().get(&server.url("/to-file")).await.unwrap_err();
         assert!(error.to_string().contains("redirect not followed"), "{error}");
+        assert_eq!(server.requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_redirect_to_a_url_with_credentials() {
+        let server = Server::start(routes);
+        let error = transport().get(&server.url("/to-credentials")).await.unwrap_err();
+        assert!(!error.to_string().contains("pw"), "{error}");
         assert_eq!(server.requests().len(), 1);
     }
 
@@ -595,6 +608,14 @@ mod ureq_cases {
         let server = Server::start(routes);
         let error = transport().get(&server.url("/to-file")).unwrap_err();
         assert!(error.to_string().contains("not http or https"), "{error}");
+        assert_eq!(server.requests().len(), 1);
+    }
+
+    #[test]
+    fn refuses_a_redirect_to_a_url_with_credentials() {
+        let server = Server::start(routes);
+        let error = transport().get(&server.url("/to-credentials")).unwrap_err();
+        assert!(error.to_string().contains("without credentials") && !error.to_string().contains("pw"), "{error}");
         assert_eq!(server.requests().len(), 1);
     }
 

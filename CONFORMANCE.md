@@ -35,7 +35,7 @@ A NaN distance, which only out-of-range coordinates in a place can produce, sort
 
 ## URLs
 
-The client checks and prepares every URL before a transport sees one (`src/xrpc.rs`): leading and trailing controls and spaces are trimmed; tab, LF and CR are dropped; spaces, other controls, non-ASCII bytes and `" < > ` { }` are percent-encoded; anything else is left alone. A URL that is not an absolute http or https URL with a host is a failed tile, or `ArgumentError::InvalidServer` for the server. That makes both transports send the bytes the reference's WHATWG URL parsing would, except:
+The client checks and prepares every URL before a transport sees one (`src/xrpc.rs`): leading and trailing controls and spaces are trimmed; tab, LF and CR are dropped; spaces, other controls, non-ASCII bytes and `" < > ` { }` are percent-encoded; anything else is left alone. A URL that is not an absolute http or https URL with a host, or that carries credentials (`https://user:pw@host/…`, which the Fetch standard's `Request` refuses), is a failed tile, or `ArgumentError::InvalidServer` for the server. That makes both transports send the bytes the reference's WHATWG URL parsing would, except:
 
 | Input | This port | Reference (`fetch`) |
 |---|---|---|
@@ -46,7 +46,7 @@ The client checks and prepares every URL before a transport sees one (`src/xrpc.
 | An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile | `https://h/x` |
 | A redirect to `https:/elsewhere` (a scheme and a path, no `//`) | `ReqwestTransport` resolves it as `fetch` does; `UreqTransport` fails the request | `https://<current host>/elsewhere` when the scheme is the current URL's |
 
-A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
+A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`, and so is a redirect to a URL that carries credentials, as in the Python port. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
 
 ## Responses
 

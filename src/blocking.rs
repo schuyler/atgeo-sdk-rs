@@ -312,7 +312,8 @@ mod ureq_transport {
                     Some(location) if redirect => {
                         let next = prepare_url(&resolve(&current, location));
                         if !is_http_url(&next) {
-                            return Err(format!("redirect to a URL that is not http or https: {next}").into());
+                            // The URL is left out of the message, which could carry credentials.
+                            return Err("redirect to a URL that is not http or https without credentials".into());
                         }
                         // Dropped unread: a redirect's body is never downloaded.
                         drop(response);

@@ -96,12 +96,23 @@ mod reqwest_transport {
             Self::with_client(Self::client_builder().build().expect("the TLS backend initialises"))
         }
 
-        /// The settings the default client uses: no `Referer` on a redirect, a 10 s connect timeout and a
-        /// 30 s idle timeout per read. Start here for a client of your own (HTTP/2, a proxy, your own TLS),
-        /// so that it keeps them.
+        /// The settings the default client uses: no `Referer` on a redirect, no redirect to a URL that carries
+        /// credentials, a 10 s connect timeout and a 30 s idle timeout per read. Start here for a client of
+        /// your own (HTTP/2, a proxy, your own TLS), so that it keeps them.
         pub fn client_builder() -> reqwest::ClientBuilder {
             reqwest::Client::builder()
                 .referer(false)
+                .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                    // reqwest's own limit of 10, and the client's refusal of credentials (contract §4.4), which
+                    // reqwest would otherwise send to the redirect's host as `Authorization: Basic`.
+                    if attempt.previous().len() > 10 {
+                        attempt.error("more than 10 redirects")
+                    } else if !attempt.url().username().is_empty() || attempt.url().password().is_some() {
+                        attempt.error("redirect to a URL that carries credentials")
+                    } else {
+                        attempt.follow()
+                    }
+                }))
                 .connect_timeout(Duration::from_secs(10))
                 .read_timeout(Duration::from_secs(30))
         }
