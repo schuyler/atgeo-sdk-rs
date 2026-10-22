@@ -63,7 +63,7 @@ pub(crate) enum TileStep {
     Cached(Slot),
     /// A request to this (prepared) URL.
     Fetch(String),
-    /// Not an absolute http or https URL: a failed tile, without a request.
+    /// Not an absolute http or https URL without credentials: a failed tile, without a request.
     Failed,
 }
 

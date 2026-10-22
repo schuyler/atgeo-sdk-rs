@@ -44,19 +44,37 @@ pub(crate) fn prepare_url(url: &str) -> String {
     out
 }
 
-/// An absolute `http` or `https` URL (scheme in any case) with a non-empty host.
+/// An absolute `http` or `https` URL (scheme in any case) with a non-empty host and no credentials.
+///
+/// Credentials are refused, as the Fetch standard's `Request` does in the reference (contract §4.4): reqwest
+/// would send them as `Authorization: Basic` to whatever host the URL names.
 pub(crate) fn is_http_url(url: &str) -> bool {
     let Some((scheme, rest)) = url.split_once("://") else { return false };
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
         return false;
     }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    let host = match host_port.strip_prefix('[') {
+    // WHATWG ends a special URL's authority at a backslash too: `https://h\\@x/y` is host `h`, path `/@x/y`.
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
+    // Any `@` is refused, an empty userinfo (`https://@h/x`) included, which `fetch` drops; CONFORMANCE.md.
+    if authority.contains('@') {
+        return false;
+    }
+    let host = match authority.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or(""),
-        None => host_port.split(':').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
     };
     !host.is_empty()
+}
+
+/// The URL with any userinfo removed from its authority, for messages.
+#[cfg(feature = "ureq")]
+pub(crate) fn without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_owned() };
+    let end = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
+    match rest[..end].rfind('@') {
+        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+        None => url.to_owned(),
+    }
 }
 
 /// Resolves a redirect's `Location` against the URL that answered with it, removing dot segments
@@ -160,14 +178,26 @@ mod tests {
 
     #[test]
     fn recognizes_http_urls() {
-        for ok in ["https://h", "HTTP://h/x", "http://u:p@h:80/x", "http://[::1]:8000/x", "https://h?q"] {
+        for ok in
+            ["https://h", "HTTP://h/x", "http://h:80/x@y", "http://[::1]:8000/x", "https://h?q", "https://h\\@x/y"]
+        {
             assert!(is_http_url(ok), "{ok}");
         }
         for bad in
             ["", "h/x", "/x", "ftp://h/x", "file:///etc/passwd", "https:///x", "https://", "http://u@/x", "https:h"]
+                .into_iter()
+                .chain(["http://u:p@h:80/x", "https://u@h/x", "https://:p@h", "https://@h/x", "https://u:p@[::1]/x"])
         {
             assert!(!is_http_url(bad), "{bad}");
         }
+    }
+
+    #[cfg(feature = "ureq")]
+    #[test]
+    fn removes_credentials_for_messages() {
+        assert_eq!(without_credentials("https://u:pw@h:8/a@b?c"), "https://h:8/a@b?c");
+        assert_eq!(without_credentials("file:///etc/passwd"), "file:///etc/passwd");
+        assert_eq!(without_credentials("https://h/x"), "https://h/x");
     }
 
     #[cfg(feature = "ureq")]

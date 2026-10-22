@@ -191,7 +191,7 @@ mod ureq_transport {
 
     use super::HttpTransport;
     use crate::transport::{BoxError, DEFAULT_MAX_BODY_BYTES, HttpResponse, USER_AGENT};
-    use crate::xrpc::{is_http_url, prepare_url, resolve};
+    use crate::xrpc::{is_http_url, prepare_url, resolve, without_credentials};
 
     const MAX_REDIRECTS: usize = 10;
     const BUFFER: usize = 64 * 1024;
@@ -312,7 +312,11 @@ mod ureq_transport {
                     Some(location) if redirect => {
                         let next = prepare_url(&resolve(&current, location));
                         if !is_http_url(&next) {
-                            return Err(format!("redirect to a URL that is not http or https: {next}").into());
+                            return Err(format!(
+                                "redirect to a URL that is not http or https without credentials: {}",
+                                without_credentials(&next)
+                            )
+                            .into());
                         }
                         // Dropped unread: a redirect's body is never downloaded.
                         drop(response);

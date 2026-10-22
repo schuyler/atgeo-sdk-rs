@@ -35,18 +35,19 @@ A NaN distance, which only out-of-range coordinates in a place can produce, sort
 
 ## URLs
 
-The client checks and prepares every URL before a transport sees one (`src/xrpc.rs`): leading and trailing controls and spaces are trimmed; tab, LF and CR are dropped; spaces, other controls, non-ASCII bytes and `" < > ` { }` are percent-encoded; anything else is left alone. A URL that is not an absolute http or https URL with a host is a failed tile, or `ArgumentError::InvalidServer` for the server. That makes both transports send the bytes the reference's WHATWG URL parsing would, except:
+The client checks and prepares every URL before a transport sees one (`src/xrpc.rs`): leading and trailing controls and spaces are trimmed; tab, LF and CR are dropped; spaces, other controls, non-ASCII bytes and `" < > ` { }` are percent-encoded; anything else is left alone. A URL that is not an absolute http or https URL with a host, or that carries credentials (`https://user:pw@host/…`, which the Fetch standard's `Request` refuses), is a failed tile, or `ArgumentError::InvalidServer` for the server. That makes both transports send the bytes the reference's WHATWG URL parsing would, except:
 
 | Input | This port | Reference (`fetch`) |
 |---|---|---|
 | `` ` ``, `{` or `}` in a query | percent-encoded (a server decodes it to the same value) | sent raw |
 | `'` in a query | `ReqwestTransport` percent-encodes it, as `fetch` does; `UreqTransport` sends it raw | `%27` |
-| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given | `/`, resolved |
+| A backslash, or a `.` or `..` segment, in a tile URL | `ReqwestTransport` reads them as WHATWG does (`/`, resolved); `UreqTransport` sends them as given in the path, and fails the request for a backslash before the path (`https://h\@x/y`: `invalid uri character`) | `/`, resolved |
 | A non-ASCII host (`café.example`) | `ReqwestTransport` sends it in punycode, as `fetch` does; `UreqTransport` fails the request, since the host arrives percent-encoded rather than in punycode | punycode |
+| An empty userinfo in a tile URL (`https://@h/x`, `https://:@h/x`) | a failed tile, as in the Python port: any `@` before the host is refused. A redirect to one: `ReqwestTransport` follows it as `fetch` would, `UreqTransport` fails the request | the userinfo dropped, the URL fetched |
 | An http(s) URL without its slashes (`https:h/x`) | not an http URL: a failed tile | `https://h/x` |
 | A redirect to `https:/elsewhere` (a scheme and a path, no `//`) | `ReqwestTransport` resolves it as `fetch` does; `UreqTransport` fails the request | `https://<current host>/elsewhere` when the scheme is the current URL's |
 
-A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
+A redirect to anything but http or https (`file:`, say) is a transport error in both transports, as it is in `fetch`, and so is a redirect to a URL that carries credentials, as in the Python port. `UreqTransport` follows redirects itself, removing dot segments as it resolves them.
 
 ## Responses
 

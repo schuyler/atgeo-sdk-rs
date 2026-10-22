@@ -86,7 +86,7 @@ impl<T: HttpTransport> AtgeoClient<T> {
 
     /// The server's base URL; trailing slashes are stripped. Default: `https://places.atgeo.org`.
     ///
-    /// Any string is taken here; one that is not an absolute http or https URL makes every call fail with
+    /// Any string is taken here; one that is not an absolute http or https URL without credentials makes every call fail with
     /// `ArgumentError::InvalidServer` before any request.
     pub fn server(self, server: impl Into<String>) -> Self {
         AtgeoClient { transport: self.transport, engine: self.engine.with_server(&server.into()) }
