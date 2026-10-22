@@ -103,8 +103,8 @@ mod reqwest_transport {
             reqwest::Client::builder()
                 .referer(false)
                 .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                    // reqwest's own limit of 10, and the client's refusal of credentials (contract §4.4), which
-                    // reqwest would otherwise send to the redirect's host as `Authorization: Basic`.
+                    // reqwest's own limit of 10, and a refusal of a redirect to a URL with credentials, which the
+                    // reference's fetch fails too, as UreqTransport and the Python port do.
                     if attempt.previous().len() > 10 {
                         attempt.error("more than 10 redirects")
                     } else if !attempt.url().username().is_empty() || attempt.url().password().is_some() {

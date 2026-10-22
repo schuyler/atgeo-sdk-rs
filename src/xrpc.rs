@@ -53,7 +53,9 @@ pub(crate) fn is_http_url(url: &str) -> bool {
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
         return false;
     }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // WHATWG ends a special URL's authority at a backslash too: `https://h\\@x/y` is host `h`, path `/@x/y`.
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
+    // Any `@` is refused, an empty userinfo (`https://@h/x`) included, which `fetch` drops; CONFORMANCE.md.
     if authority.contains('@') {
         return false;
     }
@@ -62,6 +64,17 @@ pub(crate) fn is_http_url(url: &str) -> bool {
         None => authority.split(':').next().unwrap_or(""),
     };
     !host.is_empty()
+}
+
+/// The URL with any userinfo removed from its authority, for messages.
+#[cfg(feature = "ureq")]
+pub(crate) fn without_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_owned() };
+    let end = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
+    match rest[..end].rfind('@') {
+        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+        None => url.to_owned(),
+    }
 }
 
 /// Resolves a redirect's `Location` against the URL that answered with it, removing dot segments
@@ -165,7 +178,9 @@ mod tests {
 
     #[test]
     fn recognizes_http_urls() {
-        for ok in ["https://h", "HTTP://h/x", "http://h:80/x@y", "http://[::1]:8000/x", "https://h?q"] {
+        for ok in
+            ["https://h", "HTTP://h/x", "http://h:80/x@y", "http://[::1]:8000/x", "https://h?q", "https://h\\@x/y"]
+        {
             assert!(is_http_url(ok), "{ok}");
         }
         for bad in
@@ -175,6 +190,14 @@ mod tests {
         {
             assert!(!is_http_url(bad), "{bad}");
         }
+    }
+
+    #[cfg(feature = "ureq")]
+    #[test]
+    fn removes_credentials_for_messages() {
+        assert_eq!(without_credentials("https://u:pw@h:8/a@b?c"), "https://h:8/a@b?c");
+        assert_eq!(without_credentials("file:///etc/passwd"), "file:///etc/passwd");
+        assert_eq!(without_credentials("https://h/x"), "https://h/x");
     }
 
     #[cfg(feature = "ureq")]

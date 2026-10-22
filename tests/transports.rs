@@ -392,11 +392,33 @@ mod reqwest_cases {
         assert_eq!(server.requests().len(), 1);
     }
 
+    // client_builder()'s redirect policy replaces reqwest's own, so its limit is tested here.
+    #[tokio::test]
+    async fn follows_ten_redirects_and_refuses_an_eleventh() {
+        let server = Server::start(routes);
+        let r = transport().get(&server.url("/hop/10/0")).await.unwrap();
+        assert_eq!((r.status, r.body.as_slice()), (200, &b"end of the chain"[..]));
+        assert_eq!(server.requests().len(), 11);
+
+        let server = Server::start(routes);
+        let error = transport().get(&server.url("/hop/11/0")).await.unwrap_err();
+        let source = error.source().map(|s| s.to_string()).unwrap_or_default();
+        assert!(source.contains("more than 10 redirects"), "{error}: {source}");
+        assert_eq!(server.requests().len(), 11, "the eleventh redirect's target is never requested");
+    }
+
     #[tokio::test]
     async fn refuses_a_redirect_to_a_url_with_credentials() {
         let server = Server::start(routes);
         let error = transport().get(&server.url("/to-credentials")).await.unwrap_err();
-        assert!(!error.to_string().contains("pw"), "{error}");
+        assert!(!format!("{error:?}").contains("pw"), "{error:?}");
+        let mut chain = error.to_string();
+        let mut source = error.source();
+        while let Some(s) = source {
+            chain = format!("{chain}: {s}");
+            source = s.source();
+        }
+        assert!(chain.contains("carries credentials") && !chain.contains("pw"), "{chain}");
         assert_eq!(server.requests().len(), 1);
     }
 
@@ -615,7 +637,9 @@ mod ureq_cases {
     fn refuses_a_redirect_to_a_url_with_credentials() {
         let server = Server::start(routes);
         let error = transport().get(&server.url("/to-credentials")).unwrap_err();
-        assert!(error.to_string().contains("without credentials") && !error.to_string().contains("pw"), "{error}");
+        let message = error.to_string();
+        assert!(message.contains("without credentials") && message.ends_with("/target"), "{message}");
+        assert!(!message.contains("user") && !message.contains("pw"), "{message}");
         assert_eq!(server.requests().len(), 1);
     }
 
