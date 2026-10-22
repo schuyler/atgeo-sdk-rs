@@ -163,6 +163,7 @@ mod describe {
             assert_eq!((categories[0].value.as_deref(), categories[0].count), (Some("cafe"), Some(2)));
             let refs = t.references.as_ref().unwrap();
             assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].dataset.as_deref(), Some("openstreetmap.org"));
             assert_eq!(refs[0].collection.as_deref(), Some("node"));
             assert_eq!(refs[0].licenses, Some(vec!["https://opendatacommons.org/licenses/odbl/".to_owned()]));
             assert_eq!(t.published_at, None);

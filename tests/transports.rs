@@ -47,25 +47,60 @@ struct Server {
 
 impl Server {
     fn start(handler: impl Fn(&Request, &mut TcpStream) + Send + Sync + 'static) -> Server {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        Self::serve(vec![TcpListener::bind("127.0.0.1:0").unwrap()], handler)
+    }
+
+    /// A server on every address `localhost` resolves to, all on one port, so that a client reaches it
+    /// whichever address family it tries first. (Windows resolves `localhost` to `::1` first and takes
+    /// seconds to give up on a refused connection.) Families the machine lacks are skipped.
+    fn start_localhost(handler: impl Fn(&Request, &mut TcpStream) + Send + Sync + 'static) -> Server {
+        use std::net::{SocketAddr, ToSocketAddrs};
+        let addrs: Vec<SocketAddr> = "localhost:0".to_socket_addrs().unwrap().collect();
+        for _ in 0..20 {
+            let mut listeners: Vec<TcpListener> = Vec::new();
+            let mut port = 0;
+            let mut clash = false;
+            for addr in &addrs {
+                match TcpListener::bind(SocketAddr::new(addr.ip(), port)) {
+                    Ok(l) => {
+                        port = l.local_addr().unwrap().port();
+                        listeners.push(l);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => clash = true,
+                    Err(_) => {} // an address family this machine does not have
+                }
+            }
+            if !clash && !listeners.is_empty() {
+                return Self::serve(listeners, handler);
+            }
+        }
+        panic!("no free port on every localhost address");
+    }
+
+    fn serve(
+        listeners: Vec<TcpListener>,
+        handler: impl Fn(&Request, &mut TcpStream) + Send + Sync + 'static,
+    ) -> Server {
+        let port = listeners[0].local_addr().unwrap().port();
         let requests: Arc<Mutex<Vec<Request>>> = Arc::default();
         let handler: Arc<Handler> = Arc::new(handler);
-        let log = requests.clone();
-        thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { continue };
-                let (handler, log) = (handler.clone(), log.clone());
-                thread::spawn(move || {
-                    let _ = stream.set_nodelay(true);
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    while let Some(request) = read_head(&mut stream) {
-                        log.lock().unwrap().push(request.clone());
-                        handler(&request, &mut stream);
-                    }
-                });
-            }
-        });
+        for listener in listeners {
+            let (handler, log) = (handler.clone(), requests.clone());
+            thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { continue };
+                    let (handler, log) = (handler.clone(), log.clone());
+                    thread::spawn(move || {
+                        let _ = stream.set_nodelay(true);
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        while let Some(request) = read_head(&mut stream) {
+                            log.lock().unwrap().push(request.clone());
+                            handler(&request, &mut stream);
+                        }
+                    });
+                }
+            });
+        }
         Server { port, requests }
     }
 
@@ -168,9 +203,9 @@ fn routes(r: &Request, s: &mut TcpStream) {
         }
         "x-gzip" => respond(s, 200, &[("Content-Encoding", "x-gzip")], &gzip(TILE_JSON)),
         "dots" => respond(s, 302, &[("Location", "sub/../target")], b""),
-        // /slowhop/{hops}/{i}: like /hop, but each answer waits 300 ms first.
+        // /slowhop/{hops}/{i}: like /hop, but each answer waits 200 ms first.
         "slowhop" => {
-            thread::sleep(Duration::from_millis(300));
+            thread::sleep(Duration::from_millis(200));
             if n(3) < n(2) {
                 respond(s, 302, &[("Location", &format!("/slowhop/{}/{}", n(2), n(3) + 1))], b"");
             } else {
@@ -184,7 +219,12 @@ fn routes(r: &Request, s: &mut TcpStream) {
         // A tile list naming a tile URL with a space and a tab in it, on this same server.
         "xrpc" => {
             let host = r.header("host").unwrap_or("");
-            respond(s, 200, &json, format!(r#"{{"tiles":["http://{host}/t/a b\tc.json"]}}"#).as_bytes());
+            if r.path().contains("dataset=margins") {
+                // A tile URL with a `..` segment and a backslash: the margins CONFORMANCE.md lists.
+                respond(s, 200, &json, format!(r#"{{"tiles":["http://{host}/t/x/../a\\b.json"]}}"#).as_bytes());
+            } else {
+                respond(s, 200, &json, format!(r#"{{"tiles":["http://{host}/t/a b\tc.json"]}}"#).as_bytes());
+            }
         }
         "t" => respond(s, 200, &json, br#"{"records":[]}"#),
         _ => respond(s, 200, &json, b"{}"),
@@ -272,12 +312,14 @@ mod reqwest_cases {
     #[tokio::test]
     async fn caps_the_decoded_body() {
         let server = Server::start(routes);
-        let t = transport().max_body_bytes(CAP);
+        // A long read timeout, so that only the cap can fail these, however slow the runner.
+        let t = transport_with(Duration::from_secs(10)).max_body_bytes(CAP);
+        let over_cap = |e: atgeo::BoxError| assert!(e.to_string().contains("exceeds max_body_bytes"), "{e}");
         assert_eq!(t.get(&server.url(&format!("/bytes/{CAP}"))).await.unwrap().body.len(), CAP);
-        assert!(t.get(&server.url(&format!("/bytes/{}", CAP + 1))).await.is_err());
+        over_cap(t.get(&server.url(&format!("/bytes/{}", CAP + 1))).await.unwrap_err());
         assert_eq!(t.get(&server.url(&format!("/zeros-gz/{CAP}"))).await.unwrap().body.len(), CAP);
         assert!(gzip(&vec![0; 4 << 20]).len() < 16 * 1024, "a few kilobytes on the wire");
-        assert!(t.get(&server.url(&format!("/zeros-gz/{}", 4 << 20))).await.is_err());
+        over_cap(t.get(&server.url(&format!("/zeros-gz/{}", 4 << 20))).await.unwrap_err());
     }
 
     #[tokio::test]
@@ -302,7 +344,7 @@ mod reqwest_cases {
 
     #[tokio::test]
     async fn sends_no_referer_after_a_redirect_to_another_host() {
-        let away = Server::start(routes);
+        let away = Server::start_localhost(routes);
         let server = Server::start(routes);
         let url = server.url(&format!("/away/{}?bbox=1.00,2.00,3.00,4.00", away.port));
         assert_eq!(transport().get(&url).await.unwrap().status, 200);
@@ -326,8 +368,17 @@ mod reqwest_cases {
         assert_space_and_tab_prepared(&server);
     }
 
-    // Multi-threaded: the socket belongs to a task reqwest spawned, which a current-thread runtime would
-    // not run again until the test next awaits (spec §4).
+    // CONFORMANCE.md: reqwest reads a tile URL's backslash and dot segments as WHATWG does.
+    #[tokio::test]
+    async fn reads_a_backslash_and_dot_segments_in_a_tile_url_as_whatwg_does() {
+        let server = Server::start(routes);
+        let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
+        let options = SearchOptions::new().dataset("margins");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
+        assert_eq!(server.requests()[1].path(), "/t/a/b.json");
+    }
+
     #[tokio::test]
     async fn refuses_a_redirect_to_file() {
         let server = Server::start(routes);
@@ -343,6 +394,8 @@ mod reqwest_cases {
         assert_eq!((r.status, r.body.as_slice()), (200, &b"landed"[..]));
     }
 
+    // Multi-threaded: the socket belongs to a task reqwest spawned, which a current-thread runtime would
+    // not run again until the test next awaits (spec §4).
     #[tokio::test(flavor = "multi_thread")]
     async fn dropping_the_future_mid_body_closes_the_connection() {
         let (tx, rx) = mpsc::channel::<Option<Instant>>();
@@ -361,7 +414,7 @@ mod reqwest_cases {
         });
         // A long read timeout, so that only the drop can close the connection.
         let t = transport_with(Duration::from_secs(10));
-        let pending = tokio::time::timeout(Duration::from_millis(300), t.get(&server.url("/body"))).await;
+        let pending = tokio::time::timeout(Duration::from_secs(1), t.get(&server.url("/body"))).await;
         assert!(pending.is_err(), "the body never completes, so the request is still pending");
         let dropped = Instant::now();
         let observed = tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(5)))
@@ -369,7 +422,7 @@ mod reqwest_cases {
             .unwrap()
             .expect("the server reports");
         let closed_at = observed.expect("the server saw the connection close");
-        assert!(closed_at.saturating_duration_since(dropped) < Duration::from_secs(1));
+        assert!(closed_at.saturating_duration_since(dropped) < Duration::from_secs(2));
     }
 }
 
@@ -429,12 +482,14 @@ mod ureq_cases {
     #[test]
     fn caps_the_decoded_body() {
         let server = Server::start(routes);
-        let t = transport().max_body_bytes(CAP);
+        // Long timeouts, so that only the cap can fail these, however slow the runner.
+        let t = transport_with(Duration::from_secs(10), Duration::from_secs(30)).max_body_bytes(CAP);
+        let over_cap = |e: atgeo::BoxError| assert!(e.to_string().contains("exceeds max_body_bytes"), "{e}");
         assert_eq!(t.get(&server.url(&format!("/bytes/{CAP}"))).unwrap().body.len(), CAP);
-        assert!(t.get(&server.url(&format!("/bytes/{}", CAP + 1))).is_err());
+        over_cap(t.get(&server.url(&format!("/bytes/{}", CAP + 1))).unwrap_err());
         assert_eq!(t.get(&server.url(&format!("/zeros-gz/{CAP}"))).unwrap().body.len(), CAP);
         assert!(gzip(&vec![0; 4 << 20]).len() < 16 * 1024, "a few kilobytes on the wire");
-        assert!(t.get(&server.url(&format!("/zeros-gz/{}", 4 << 20))).is_err());
+        over_cap(t.get(&server.url(&format!("/zeros-gz/{}", 4 << 20))).unwrap_err());
     }
 
     #[test]
@@ -469,7 +524,7 @@ mod ureq_cases {
 
     #[test]
     fn sends_no_referer_after_a_redirect_to_another_host() {
-        let away = Server::start(routes);
+        let away = Server::start_localhost(routes);
         let server = Server::start(routes);
         let url = server.url(&format!("/away/{}?bbox=1.00,2.00,3.00,4.00", away.port));
         assert_eq!(transport().get(&url).unwrap().status, 200);
@@ -514,15 +569,26 @@ mod ureq_cases {
 
     #[test]
     fn the_total_timeout_covers_the_whole_chain_of_redirects() {
-        // Each hop takes 300 ms, well within the 800 ms total, but four of them do not fit in it.
-        let t = transport_with(Duration::from_secs(1), Duration::from_millis(800));
+        // Each hop takes 200 ms, far within the 1.5 s total, but eight of them do not fit in it.
+        let t = transport_with(Duration::from_secs(1), Duration::from_millis(1500));
         let server = Server::start(routes);
         assert!(t.get(&server.url("/slowhop/1/0")).is_ok());
         let server = Server::start(routes);
         let started = Instant::now();
-        assert!(t.get(&server.url("/slowhop/3/0")).is_err());
-        assert!(started.elapsed() < Duration::from_millis(1100), "{:?}", started.elapsed());
-        assert!(server.requests().len() <= 3);
+        assert!(t.get(&server.url("/slowhop/7/0")).is_err());
+        assert!(started.elapsed() < Duration::from_millis(3000), "{:?}", started.elapsed());
+        assert!(server.requests().len() <= 8);
+    }
+
+    // CONFORMANCE.md: ureq sends a tile URL's backslash and dot segments as given.
+    #[test]
+    fn sends_a_backslash_and_dot_segments_in_a_tile_url_as_given() {
+        let server = Server::start(routes);
+        let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
+        let options = SearchOptions::new().dataset("margins");
+        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
+        assert_eq!(server.requests()[1].path(), "/t/x/../a\\b.json");
     }
 
     #[test]

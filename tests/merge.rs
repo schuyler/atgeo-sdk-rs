@@ -327,3 +327,102 @@ mod determinism {
         }
     }
 }
+
+// Contract edges no ported reference test pins, found by mutating the implementation.
+mod contract_edges {
+    use super::*;
+
+    fn here(id: &str, name: &str) -> Value {
+        simple(id, name, vec![point(37.775, -122.415)])
+    }
+
+    both! {
+        fn orders_tile_urls_by_utf16_code_units_so_the_lowest_by_code_units_wins_dedupe(kind: Kind) {
+            // By str order U+FF61 sorts first; by UTF-16 code units U+10000 (D800 DC00) does. The tiles are served
+            // at the percent-encoded URLs the client prepares.
+            let fake = FakeServer::builder()
+                .tilesets(vec![overture(vec![
+                    tile("https://t.example/%EF%BD%A1.json", vec![rec(here("dup", "Copy FF61"))]),
+                    tile("https://t.example/%F0%90%80%80.json", vec![rec(here("dup", "Copy 10000"))]),
+                ])])
+                .tiles_for(|_| {
+                    TilesFor::Urls(vec!["https://t.example/\u{FF61}.json".into(), "https://t.example/\u{10000}.json".into()])
+                })
+                .build();
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            assert_eq!(result.tiles.fetched, 2);
+            assert_eq!(names(&result), ["Copy 10000"]);
+        }
+    }
+
+    both! {
+        fn breaks_origin_ties_by_utf16_code_units(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![tile(
+                &url("a"),
+                vec![record(here("\u{FF61}", "Same"), Some(5), None), record(here("\u{10000}", "Same"), Some(5), None)],
+            )])]);
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            assert_eq!(origins(&result), [Some(place_origin("\u{10000}")), Some(place_origin("\u{FF61}"))]);
+        }
+    }
+
+    both! {
+        fn keeps_the_first_copy_within_a_tile(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![tile(
+                &url("a"),
+                vec![rec(here("dup", "First copy")), rec(here("dup", "Second copy"))],
+            )])]);
+            assert_eq!(names(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["First copy"]);
+        }
+    }
+
+    // §4.6: dedupe picks the winner before the region filter, so a winner outside the region drops the place
+    // even though another copy is inside. A documented pothole, reproduced on purpose.
+    both! {
+        fn dedupes_before_the_region_filter(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![
+                tile(&url("a"), vec![rec(simple("dup", "Far copy", vec![point(40.0, -100.0)]))]),
+                tile(&url("b"), vec![rec(here("dup", "Near copy")), rec(here("other", "Other"))]),
+            ])]);
+            assert_eq!(names(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["Other"]);
+        }
+    }
+
+    both! {
+        fn breaks_similarity_ties_by_distance_before_origin(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![
+                rec(simple("a", "Same", vec![point(37.779, -122.415)])),
+                rec(simple("b", "Same", vec![point(37.775, -122.415)])),
+            ])])]);
+            let result = kind
+                .client(&fake)
+                .ok(Region::circle(37.775, -122.415, 1000.0), SearchOptions::new().text("Same").sort(atgeo::SortMode::Similarity));
+            assert_eq!(origins(&result), [Some(place_origin("b")), Some(place_origin("a"))]);
+        }
+    }
+
+    // "Taaa" scores 0.595 against "Starbux" in the reference: below the 0.6 threshold.
+    both! {
+        fn drops_a_score_just_under_the_threshold(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![
+                rec(here("taaa", "Taaa")),
+                rec(here("sb", "Starbucks")),
+            ])])]);
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new().text("Starbux"));
+            assert_eq!(origins(&result), [Some(place_origin("sb"))]);
+        }
+    }
+
+    // In the reference these score 0.888895 and 0.888631: equal to three decimals, so importance decides.
+    both! {
+        fn compares_scores_to_three_decimals(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![
+                record(here("a", "reading reading markt"), Some(1), None),
+                record(here("b", "reading readin marker"), Some(9), None),
+            ])])]);
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new().text("Reading Terminal Market"));
+            assert_eq!(origins(&result), [Some(place_origin("b")), Some(place_origin("a"))]);
+            assert!(result.places[0].score.unwrap() < result.places[1].score.unwrap());
+        }
+    }
+}

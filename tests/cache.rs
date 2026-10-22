@@ -234,18 +234,31 @@ mod budget {
     }
 
     both! {
-        fn a_budget_of_two_tiles_keeps_the_two_most_recently_used(kind: Kind) {
+        fn a_budget_of_two_tiles_keeps_two(kind: Kind) {
             let fake = three_tiles();
             // Every tile body here is the same length, so the size of one tells the budget.
             let one = fake.handle(&url("a")).body.len() as u64;
             let client = kind.configured(&fake, Config { budget: Some(2 * one), ..Config::default() });
             client.ok(REGION, SearchOptions::new());
-            // Fetched in URL order a, b, c: inserting c evicted a.
+            // Which one goes depends on the order the tiles are stored in, which the blocking client's threads
+            // do not fix (CONFORMANCE.md); the async test below pins it.
             fake.go_offline();
-            assert!(client.get_place(&place_origin("a")).is_err());
-            assert_eq!(client.get_place(&place_origin("b")).unwrap().name(), Some("b"));
-            assert_eq!(client.get_place(&place_origin("c")).unwrap().name(), Some("c"));
+            let cached = ["a", "b", "c"].iter().filter(|n| client.get_place(&place_origin(n)).is_ok()).count();
+            assert_eq!(cached, 2);
         }
+    }
+
+    #[test]
+    fn a_budget_of_two_tiles_keeps_the_two_most_recently_used() {
+        let fake = three_tiles();
+        let one = fake.handle(&url("a")).body.len() as u64;
+        let client = Kind::Async.configured(&fake, Config { budget: Some(2 * one), ..Config::default() });
+        client.ok(REGION, SearchOptions::new());
+        // Stored in URL order a, b, c: inserting c evicted a.
+        fake.go_offline();
+        assert!(client.get_place(&place_origin("a")).is_err());
+        assert_eq!(client.get_place(&place_origin("b")).unwrap().name(), Some("b"));
+        assert_eq!(client.get_place(&place_origin("c")).unwrap().name(), Some("c"));
     }
 }
 

@@ -91,6 +91,15 @@ mod tiles {
     }
 
     both! {
+        fn a_tile_with_no_records_is_used_not_failed(kind: Kind) {
+            for body in [r#"{"records":[]}"#, r#"{"records":[null, 1, {"value": 2}]}"#] {
+                let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
+                assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 0, true), "{body}");
+            }
+        }
+    }
+
+    both! {
         fn skips_unusable_records_and_keeps_the_tile(kind: Kind) {
             let body = records_body(json!([
                 null, 3, "x", [1], {}, { "value": null }, { "value": 7 }, { "value": [here("arr")] },

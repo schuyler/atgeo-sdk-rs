@@ -89,11 +89,9 @@ fn the_first_get_tiles_error_returns_at_once_and_drops_the_other_half() {
             |bbox| if bbox.starts_with("170") { TilesFor::Error("BboxTooLarge", "no") } else { TilesFor::Urls(vec![]) },
         )
         .build();
-    let second_half = "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&collection=place&bbox=-180.00%2C10.00%2C-170.00%2C20.00";
-    let first_half = "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&collection=place&bbox=170.00%2C10.00%2C180.00%2C20.00";
     // Both requests are in flight when the first fails.
-    fake.delay(first_half, Duration::from_millis(10));
-    fake.delay(second_half, Duration::from_secs(60));
+    fake.delay_containing("bbox=170.00", Duration::from_millis(10));
+    fake.delay_containing("bbox=-180.00", Duration::from_secs(60));
     let client = AtgeoClient::with_transport(fake.clone());
     let rt = runtime();
     let started = rt.block_on(async { tokio::time::Instant::now() });
@@ -102,7 +100,7 @@ fn the_first_get_tiles_error_returns_at_once_and_drops_the_other_half() {
     assert_eq!(code_of(&e), "BboxTooLarge");
     assert!(rt.block_on(async { tokio::time::Instant::now() }) - started < Duration::from_secs(1));
     assert_eq!(fake.dropped(), 1);
-    assert_eq!(fake.requests().iter().filter(|r| r.as_str() == second_half).count(), 1);
+    assert_eq!(fake.requests().iter().filter(|r| r.contains("bbox=-180.00")).count(), 1);
 }
 
 #[test]
@@ -206,10 +204,12 @@ mod blocking {
                 }
             })
             .build();
-        let first_half = "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&collection=place&bbox=170.00%2C10.00%2C180.00%2C20.00";
-        fake.delay(first_half, Duration::from_millis(100));
+        // The first half answers last, so this returns its error only by choosing it, not by its arrival.
+        fake.delay_containing("bbox=170.00", Duration::from_millis(100));
         let client = atgeo::blocking::AtgeoClient::with_transport(fake.clone());
+        let started = std::time::Instant::now();
         let e = client.search_places(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new()).unwrap_err();
+        assert!(started.elapsed() >= Duration::from_millis(100), "the delay applied, and both halves were awaited");
         assert_eq!(code_of(&e), "BboxTooLarge");
         assert_eq!(fake.dropped(), 0);
         assert_eq!(fake.in_flight(), 0);

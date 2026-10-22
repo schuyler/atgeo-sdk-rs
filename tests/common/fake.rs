@@ -122,6 +122,7 @@ struct State {
     raw: HashMap<String, (u16, Vec<u8>)>,
     answer_everything: Option<(u16, Vec<u8>)>,
     delays: HashMap<String, Duration>,
+    delays_containing: Vec<(String, Duration)>,
 }
 
 struct Inner {
@@ -365,6 +366,12 @@ impl FakeServer {
         self.state().delays.insert(url.to_owned(), d);
     }
 
+    /// Delays every request whose URL contains `part` and has no delay of its own, such as one half of a
+    /// crossing region by `bbox=170.00`, whatever the client's encoding of the rest.
+    pub fn delay_containing(&self, part: &str, d: Duration) {
+        self.state().delays_containing.push((part.to_owned(), d));
+    }
+
     /// Delays every tile URL that has no delay of its own.
     pub fn delay_all(&self, d: Duration) {
         self.state().delays.insert(String::new(), d);
@@ -391,7 +398,11 @@ impl FakeServer {
             if s.offline || s.network_errors.contains(url) {
                 return Err(Box::new(std::io::Error::other("network disabled")));
             }
-            s.delays.get(url).or_else(|| if url.contains("/xrpc/") { None } else { s.delays.get("") }).copied()
+            s.delays
+                .get(url)
+                .or_else(|| s.delays_containing.iter().find(|(part, _)| url.contains(part.as_str())).map(|(_, d)| d))
+                .or_else(|| if url.contains("/xrpc/") { None } else { s.delays.get("") })
+                .copied()
         };
         let now = self.0.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         self.0.peak.fetch_max(now, Ordering::SeqCst);
