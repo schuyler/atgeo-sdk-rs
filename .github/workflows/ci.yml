@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -92,9 +95,11 @@ jobs:
   fixtures:
     runs-on: ubuntu-latest
     env:
-      CHECK_FIXTURES_REF: a1a2d8e401c16fed7532b141cc1cee160a554bdf
+      CHECK_FIXTURES_REF: 08b259226529b85ebe89845e35172cb59a317d80
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/check-fixtures.sh" \
             "https://raw.githubusercontent.com/schuyler/atgeo-sdk-js/$CHECK_FIXTURES_REF/scripts/check-fixtures.sh"
