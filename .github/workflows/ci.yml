@@ -95,7 +95,7 @@ jobs:
   fixtures:
     runs-on: ubuntu-latest
     env:
-      CHECK_FIXTURES_REF: 08b259226529b85ebe89845e35172cb59a317d80
+      CHECK_FIXTURES_REF: 07b14a0985cf561aba077963eab60ad3c61d012f
     steps:
       - uses: actions/checkout@v7
         with:
