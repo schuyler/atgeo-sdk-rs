@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -85,3 +88,19 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories licenses bans sources
+
+  # The vendored fixtures and lexicons are what their SOURCE files say (atgeo-sdk-js#34). The script is
+  # fetched at a pinned commit, so a change to it reaches this repository only when the pin moves. A pin
+  # that has fallen behind its upstream is a warning annotation, not a failure.
+  fixtures:
+    runs-on: ubuntu-latest
+    env:
+      CHECK_FIXTURES_REF: b420aabc01085970ee33701405de8bb88265c04c
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/check-fixtures.sh" \
+            "https://raw.githubusercontent.com/schuyler/atgeo-sdk-js/$CHECK_FIXTURES_REF/scripts/check-fixtures.sh"
+          bash "$RUNNER_TEMP/check-fixtures.sh" --fixtures tests/fixtures
