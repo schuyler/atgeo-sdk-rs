@@ -1,0 +1,967 @@
+[
+  {
+    "name": "reference entries are included",
+    "description": "A tile lists the collection it carries and a reference collection; both are credited, sorted by collection, and the hit names its own collection with exactly dataset and collection.",
+    "dataset": "overturemaps.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:overturemaps.org:place:1",
+                "name": "Cafe",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "overturemaps.org",
+              "collection": "place",
+              "release": "2026-01-01",
+              "source": "https://overturemaps.org",
+              "licenses": [
+                "CDLA-Permissive-2.0"
+              ],
+              "attribution": "Overture Maps Foundation"
+            },
+            {
+              "dataset": "overturemaps.org",
+              "collection": "division",
+              "release": "2026-01-01",
+              "source": "https://overturemaps.org",
+              "licenses": [
+                "ODbL-1.0",
+                "CC0-1.0"
+              ],
+              "attribution": "Overture divisions"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "overturemaps.org",
+          "collection": "division",
+          "release": "2026-01-01",
+          "source": "https://overturemaps.org",
+          "licenses": [
+            "ODbL-1.0",
+            "CC0-1.0"
+          ],
+          "attribution": "Overture divisions"
+        },
+        {
+          "dataset": "overturemaps.org",
+          "collection": "place",
+          "release": "2026-01-01",
+          "source": "https://overturemaps.org",
+          "licenses": [
+            "CDLA-Permissive-2.0"
+          ],
+          "attribution": "Overture Maps Foundation"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:overturemaps.org:place:1",
+          "collection": {
+            "dataset": "overturemaps.org",
+            "collection": "place"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "deduped by pair, lowest tile URL wins",
+    "description": "Tiles are listed b then a and both carry the same pair with different releases; the lowest URL (a) wins. Entries only in b are still included. The losing b entry also has a licenses field the winner lacks; it must not be filled in.",
+    "dataset": "x.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/b.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [],
+          "attribution": [
+            {
+              "dataset": "x.org",
+              "collection": "c",
+              "release": "from-b",
+              "licenses": [
+                "l-b-only"
+              ]
+            },
+            {
+              "dataset": "y.org",
+              "collection": "c",
+              "release": "only-b"
+            }
+          ]
+        }
+      },
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [],
+          "attribution": [
+            {
+              "dataset": "x.org",
+              "collection": "c",
+              "release": "from-a"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "x.org",
+          "collection": "c",
+          "release": "from-a"
+        },
+        {
+          "dataset": "y.org",
+          "collection": "c",
+          "release": "only-b"
+        }
+      ],
+      "hits": []
+    }
+  },
+  {
+    "name": "sorted by dataset then collection, ordinal",
+    "description": "Served unsorted. Ordinal order puts Example.org before example.org and way before wayside; the pipe-joined key trap pair must stay two entries.",
+    "dataset": "openstreetmap.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [],
+          "attribution": [
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "way",
+              "release": "1"
+            },
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "node",
+              "release": "2"
+            },
+            {
+              "dataset": "Example.org",
+              "collection": "x",
+              "release": "3"
+            },
+            {
+              "dataset": "example.org",
+              "collection": "x",
+              "release": "4"
+            },
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "wayside",
+              "release": "5"
+            },
+            {
+              "dataset": "a|b",
+              "collection": "c",
+              "release": "6"
+            },
+            {
+              "dataset": "a",
+              "collection": "b|c",
+              "release": "7"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "Example.org",
+          "collection": "x",
+          "release": "3"
+        },
+        {
+          "dataset": "a",
+          "collection": "b|c",
+          "release": "7"
+        },
+        {
+          "dataset": "a|b",
+          "collection": "c",
+          "release": "6"
+        },
+        {
+          "dataset": "example.org",
+          "collection": "x",
+          "release": "4"
+        },
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "node",
+          "release": "2"
+        },
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "way",
+          "release": "1"
+        },
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "wayside",
+          "release": "5"
+        }
+      ],
+      "hits": []
+    }
+  },
+  {
+    "name": "a tile whose records all fall outside the region still contributes",
+    "description": "The only record is far outside the region, so no hit survives, but the tile was used and its attribution is credited.",
+    "dataset": "overturemaps.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:overturemaps.org:place:far",
+                "name": "Far",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "0.000000",
+                    "longitude": "0.000000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "overturemaps.org",
+              "collection": "place",
+              "release": "2026-01-01",
+              "source": "https://overturemaps.org",
+              "licenses": [
+                "CDLA-Permissive-2.0"
+              ],
+              "attribution": "Overture Maps Foundation"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "overturemaps.org",
+          "collection": "place",
+          "release": "2026-01-01",
+          "source": "https://overturemaps.org",
+          "licenses": [
+            "CDLA-Permissive-2.0"
+          ],
+          "attribution": "Overture Maps Foundation"
+        }
+      ],
+      "hits": []
+    }
+  },
+  {
+    "name": "a failed tile contributes nothing",
+    "description": "One tile fails to decode but carries readable attribution, one answers 500, and one is good. Only the good tile's entry is credited.",
+    "dataset": "overturemaps.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:overturemaps.org:place:1",
+                "name": "Cafe",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "overturemaps.org",
+              "collection": "place",
+              "release": "2026-01-01",
+              "source": "https://overturemaps.org",
+              "licenses": [
+                "CDLA-Permissive-2.0"
+              ],
+              "attribution": "Overture Maps Foundation"
+            }
+          ]
+        }
+      },
+      {
+        "url": "https://places.atgeo.org/tiles/b.json",
+        "body": {
+          "records": "x",
+          "attribution": [
+            {
+              "dataset": "leak.example",
+              "collection": "c"
+            }
+          ]
+        }
+      },
+      {
+        "url": "https://places.atgeo.org/tiles/c.json",
+        "status": 500
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "overturemaps.org",
+          "collection": "place",
+          "release": "2026-01-01",
+          "source": "https://overturemaps.org",
+          "licenses": [
+            "CDLA-Permissive-2.0"
+          ],
+          "attribution": "Overture Maps Foundation"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:overturemaps.org:place:1",
+          "collection": {
+            "dataset": "overturemaps.org",
+            "collection": "place"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "the collection is a prefix match, not a split",
+    "description": "Dataset-only search. way must not match wayside, an origin with no entry gets null, and a uri-keyed record with no origin gets null even though its uri looks like a way URN. An origin that merely contains a way prefix after another prefix gets null (startsWith, not includes).",
+    "dataset": "openstreetmap.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:2",
+                "name": "W",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:wayside:9",
+                "name": "S",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:example.org:thing:1",
+                "name": "T",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "uri": "urn:atgeo:openstreetmap.org:way:77",
+              "value": {
+                "$type": "org.atgeo.place",
+                "name": "U",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:example.org:urn:atgeo:openstreetmap.org:way:5",
+                "name": "Embedded",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "way",
+              "release": "r1",
+              "licenses": [
+                "ODbL-1.0"
+              ]
+            },
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "wayside",
+              "release": "r2",
+              "source": "s"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "way",
+          "release": "r1",
+          "licenses": [
+            "ODbL-1.0"
+          ]
+        },
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "wayside",
+          "release": "r2",
+          "source": "s"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:2",
+          "collection": {
+            "dataset": "openstreetmap.org",
+            "collection": "way"
+          }
+        },
+        {
+          "origin": "urn:atgeo:openstreetmap.org:wayside:9",
+          "collection": {
+            "dataset": "openstreetmap.org",
+            "collection": "wayside"
+          }
+        },
+        {
+          "origin": "urn:atgeo:example.org:thing:1",
+          "collection": null
+        },
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:77",
+          "collection": null
+        },
+        {
+          "origin": "urn:atgeo:example.org:urn:atgeo:openstreetmap.org:way:5",
+          "collection": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "the kept copy's tile decides the collection",
+    "description": "The same origin is in a.json (whose attribution lacks its pair) and b.json (which has it). The lowest URL's copy is kept, so the hit has a null collection, while the union still has b's entry.",
+    "dataset": "openstreetmap.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/b.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:1",
+                "name": "W",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "way",
+              "release": "b"
+            }
+          ]
+        }
+      },
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:1",
+                "name": "W",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "example.org",
+              "collection": "other",
+              "release": "a"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "example.org",
+          "collection": "other",
+          "release": "a"
+        },
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "way",
+          "release": "b"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:1",
+          "collection": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "absent and unusable attribution",
+    "description": "One tile has no attribution and one has entries lacking collection. Nothing is credited and both hits have a null collection.",
+    "dataset": "openstreetmap.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:1",
+                "name": "W",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "url": "https://places.atgeo.org/tiles/b.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:2",
+                "name": "W2",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "openstreetmap.org"
+            },
+            {
+              "collection": "way"
+            },
+            null
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [],
+      "hits": [
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:1",
+          "collection": null
+        },
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:2",
+          "collection": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "a duplicate pair within one tile: the first wins",
+    "description": "Two entries for one pair differ in release; the first in served order is kept. The second entry also has a licenses field the first lacks; it must not be filled in.",
+    "dataset": "x.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [],
+          "attribution": [
+            {
+              "dataset": "x.org",
+              "collection": "c",
+              "release": "1"
+            },
+            {
+              "dataset": "x.org",
+              "collection": "c",
+              "release": "2",
+              "licenses": [
+                "l-second-only"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "x.org",
+          "collection": "c",
+          "release": "1"
+        }
+      ],
+      "hits": []
+    }
+  },
+  {
+    "name": "no tiles",
+    "description": "The server lists no tiles. The attribution is an empty list, not absent.",
+    "dataset": "x.org",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [],
+    "expect": {
+      "attribution": [],
+      "hits": []
+    }
+  },
+  {
+    "name": "two entries give the same prefix: the first in served order wins",
+    "description": "Entries a:b/c and a/b:c both prefix urn:atgeo:a:b:c:1. The first served wins the hit; the result is sorted and keeps both (a colon-joined key would merge them).",
+    "dataset": "a",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:a:b:c:1",
+                "name": "N",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "a:b",
+              "collection": "c",
+              "release": "1"
+            },
+            {
+              "dataset": "a",
+              "collection": "b:c",
+              "release": "2"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "a",
+          "collection": "b:c",
+          "release": "2"
+        },
+        {
+          "dataset": "a:b",
+          "collection": "c",
+          "release": "1"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:a:b:c:1",
+          "collection": {
+            "dataset": "a:b",
+            "collection": "c"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "a collection-filtered search whose tile lacks the pair",
+    "description": "A search of openstreetmap.org/way passes the filter on its origin prefix, but the tile lists only node, so the hit's collection is null. A record with no origin whose uri looks like a way URN is not in the collection, so it is dropped by the filter (the filter tests value.origin only). An origin that contains but does not start with the way prefix is dropped by the filter.",
+    "dataset": "openstreetmap.org",
+    "collection": "way",
+    "region": {
+      "bbox": [
+        -122.42,
+        37.76,
+        -122.41,
+        37.78
+      ]
+    },
+    "tiles": [
+      {
+        "url": "https://places.atgeo.org/tiles/a.json",
+        "body": {
+          "publishedAt": "2026-01-01T00:00:00Z",
+          "records": [
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:openstreetmap.org:way:2",
+                "name": "W",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "uri": "urn:atgeo:openstreetmap.org:way:77",
+              "value": {
+                "$type": "org.atgeo.place",
+                "name": "Keyed by uri",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            },
+            {
+              "value": {
+                "$type": "org.atgeo.place",
+                "origin": "urn:atgeo:example.org:urn:atgeo:openstreetmap.org:way:5",
+                "name": "Embedded",
+                "locations": [
+                  {
+                    "$type": "community.lexicon.location.geo",
+                    "latitude": "37.770000",
+                    "longitude": "-122.415000"
+                  }
+                ]
+              }
+            }
+          ],
+          "attribution": [
+            {
+              "dataset": "openstreetmap.org",
+              "collection": "node",
+              "release": "n"
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "attribution": [
+        {
+          "dataset": "openstreetmap.org",
+          "collection": "node",
+          "release": "n"
+        }
+      ],
+      "hits": [
+        {
+          "origin": "urn:atgeo:openstreetmap.org:way:2",
+          "collection": null
+        }
+      ]
+    }
+  }
+]
