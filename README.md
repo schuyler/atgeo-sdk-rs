@@ -258,7 +258,7 @@ The blocking client runs a search on scoped threads, eight at most for the tiles
 
 Your search text never leaves the device. Neither does your precise location.
 
-To search, the client asks the server which tiles cover an area, downloads those tiles, and does the matching, filtering, and ranking locally. The only location a search sends is a bounding box (two across the antimeridian), snapped outward to a 0.01 degree grid (roughly 1 km of latitude) before it goes out; alongside it go the search's dataset and, if it has one, its collection (including the default `place`). Your exact region is used only on the device, to filter and to compute distances.
+To search, the client asks the server which tiles cover an area, downloads those tiles, and does the matching, filtering, and ranking locally. The only location a search sends is a bounding box (two across the antimeridian), snapped outward to a 0.01 degree grid (roughly 1 km of latitude) before it goes out; alongside it go the search's dataset and, if it has one, its collection. Your exact region is used only on the device, to filter and to compute distances.
 
 What does go on the wire:
 
@@ -293,7 +293,7 @@ There's also an end-to-end run against a live server, through both clients, whic
 ATGEO_SERVER=http://localhost:8000 cargo run --all-features --example e2e
 ```
 
-It needs the server work tracked in [garganorn#27](https://github.com/schuyler/garganorn/issues/27) (attribution in tiles and the new `getPlace` shape); until that's deployed, it can't pass against places.atgeo.org or an older garganorn. It takes the same environment variables as the reference's `scripts/e2e.ts`: `ATGEO_SERVER` (default `http://localhost:8000`), `ATGEO_DATASET` (default `openstreetmap.org`), `ATGEO_COLLECTION` (default none), and `ATGEO_REGION` as `lat,lon,radius` in meters (default `43.0,-71.45,3000`, Manchester, NH). It prints a line per step and exits non-zero if either client fails. Against places.atgeo.org: `ATGEO_SERVER=https://places.atgeo.org ATGEO_DATASET=overturemaps.org ATGEO_REGION=39.9526,-75.1652,1000`.
+It needs the next garganorn release, tracked in [garganorn#27](https://github.com/schuyler/garganorn/issues/27): it breaks the lexicons (the new `getPlace` shape, `.json` tile URLs, `maxTiles` and `overview`), so the server has to be rebuilt and deployed first. Until then it can't pass against an older garganorn or places.atgeo.org. It takes the same environment variables as the reference's `scripts/e2e.ts`: `ATGEO_SERVER` (default `http://localhost:8000`), `ATGEO_DATASET` (default `openstreetmap.org`), `ATGEO_COLLECTION` (default none), and `ATGEO_REGION` as `lat,lon,radius` in meters (default `43.0,-71.45,3000`, Manchester, NH). It prints a line per step and exits non-zero if either client fails. Against places.atgeo.org, once that release is deployed there: `ATGEO_SERVER=https://places.atgeo.org ATGEO_DATASET=overturemaps.org ATGEO_REGION=39.9526,-75.1652,1000`.
 
 ## Server requirements
 

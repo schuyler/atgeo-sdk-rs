@@ -189,3 +189,50 @@ both! {
         );
     }
 }
+
+// Each hit takes its collection from the tile its own record came from, even when the tiles' attributions
+// differ (contract §8), and a record the text filter drops does not shift the others onto its tile's.
+fn two_tiles(a_name: &str) -> FakeServer {
+    let (a, b) = ("https://places.atgeo.org/tiles/a.json", "https://places.atgeo.org/tiles/b.json");
+    let record = |c: &str, n: &str, name: &str| {
+        json!({ "value": {
+            "$type": "org.atgeo.place", "origin": format!("urn:atgeo:d:{c}:{n}"), "name": name,
+            "locations": [point(37.775, -122.415)],
+        } })
+    };
+    let fake = FakeServer::builder()
+        .tilesets(vec![{
+            let mut t = overture(vec![]);
+            t.collections = vec![json!({ "dataset": "d", "collection": "c1" })];
+            t
+        }])
+        .tiles_for(move |_| TilesFor::Urls(vec![a.to_owned(), b.to_owned()]))
+        .build();
+    let body = |c: &str, n: &str, name: &str| {
+        json!({ "records": [record(c, n, name)], "attribution": [{ "dataset": "d", "collection": c }] }).to_string()
+    };
+    fake.raw(a, 200, body("c1", "1", a_name));
+    fake.raw(b, 200, body("c2", "2", "Cafe"));
+    fake
+}
+
+both! {
+    fn each_hit_takes_the_collection_of_its_own_tile(kind: Kind) {
+        let result = kind.client(&two_tiles("Cafe")).ok(REGION, SearchOptions::new("d"));
+        let mut got: Vec<(String, Value)> =
+            result.places.iter().map(|h| (h.origin.clone().unwrap(), collection_json(&h.collection))).collect();
+        got.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(got, [
+            ("urn:atgeo:d:c1:1".to_owned(), json!({ "dataset": "d", "collection": "c1" })),
+            ("urn:atgeo:d:c2:2".to_owned(), json!({ "dataset": "d", "collection": "c2" })),
+        ]);
+    }
+}
+
+both! {
+    fn a_record_the_text_filter_drops_does_not_shift_the_collections_of_the_rest(kind: Kind) {
+        let result = kind.client(&two_tiles("Zzzzqqq")).ok(REGION, SearchOptions::new("d").text("Cafe"));
+        assert_eq!(origins(&result), [Some("urn:atgeo:d:c2:2".to_owned())]);
+        assert_eq!(collection_json(&result.places[0].collection), json!({ "dataset": "d", "collection": "c2" }));
+    }
+}
