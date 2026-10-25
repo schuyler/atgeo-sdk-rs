@@ -9,7 +9,7 @@ use crate::cache::TileRecord;
 use crate::error::{AtgeoError, DecodingError};
 use crate::types::{
     Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, ServedTileset,
-    ServiceDescription, Tileset,
+    ServiceDescription, Tileset, TilesetOverview,
 };
 
 /// Decodes a body as `JSON.parse(await response.text())` would: invalid UTF-8 becomes U+FFFD and a leading
@@ -94,6 +94,27 @@ pub(crate) fn error_from(status: u16, body: &[u8]) -> AtgeoError {
     )
 }
 
+/// An `attribution` list (contract §1): the entries that are objects with a string `dataset` and `collection`,
+/// each other field read on its own, in served order with duplicates kept. `None` unless `v` is an array.
+pub(crate) fn attributions(v: Option<&Value>) -> Option<Vec<Attribution>> {
+    let Some(Value::Array(list)) = v else { return None };
+    Some(
+        list.iter()
+            .filter_map(Value::as_object)
+            .filter_map(|o| {
+                Some(Attribution {
+                    dataset: string(o, "dataset")?,
+                    collection: string(o, "collection")?,
+                    release: string(o, "release"),
+                    source: string(o, "source"),
+                    attribution: string(o, "attribution"),
+                    licenses: strings(o, "licenses"),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// A tile list: the string entries of `tiles` and the truthiness of `overview`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TileList {
@@ -141,8 +162,7 @@ pub(crate) fn tile_payload(body: &[u8]) -> Result<TilePayload, DecodingError> {
             Some(TileRecord { value: Arc::new(value), uri, importance: importance_of(r.get("importance")) })
         })
         .collect();
-    // TODO(contract-43): read the payload's `attribution` (§1).
-    Ok(TilePayload { records, attribution: None })
+    Ok(TilePayload { records, attribution: attributions(payload.get("attribution")) })
 }
 
 /// What a getPlace body holds that the client keeps (contract §1).
@@ -160,10 +180,10 @@ pub(crate) fn place_view(body: &[u8]) -> Result<PlaceView, DecodingError> {
         return Err(DecodingError::shape("getPlace response is not an object"));
     };
     let importance = importance_of(view.get("importance"));
-    // TODO(contract-43): read `value` and `attribution`, not the earlier `record` shape (§1).
-    match view.remove("record") {
-        Some(Value::Object(value)) => Ok(PlaceView { value, importance, attribution: Vec::new() }),
-        _ => Err(DecodingError::shape("getPlace response has no record object")),
+    let attribution = attributions(view.get("attribution")).unwrap_or_default();
+    match view.remove("value") {
+        Some(Value::Object(value)) => Ok(PlaceView { value, importance, attribution }),
+        _ => Err(DecodingError::shape("getPlace response has no value object")),
     }
 }
 
@@ -232,7 +252,7 @@ pub(crate) fn service_description(body: &[u8]) -> Result<ServiceDescription, Dec
     let o = describe_body(body, "describeService")?;
     Ok(ServiceDescription {
         did: string(&o, "did"),
-        max_tiles: None, // TODO(contract-43): importance_of(o.get("maxTiles")) (§1)
+        max_tiles: importance_of(o.get("maxTiles")),
         tilesets: objects(&o, "tilesets", |t| ServedTileset {
             slug: string(t, "slug"),
             collections: objects(t, "collections", collection_ref).unwrap_or_default(),
@@ -254,7 +274,10 @@ pub(crate) fn tileset(body: &[u8]) -> Result<Tileset, DecodingError> {
         }),
         collections: objects(&o, "collections", collection_info).unwrap_or_default(),
         references: objects(&o, "references", attribution),
-        overview: None, // TODO(contract-43): the `overview` object and its `records` (§9)
+        overview: o
+            .get("overview")
+            .and_then(Value::as_object)
+            .map(|v| TilesetOverview { records: importance_of(v.get("records")) }),
     })
 }
 

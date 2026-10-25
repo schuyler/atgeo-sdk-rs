@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::rank::cmp_utf16;
-use crate::types::Place;
+use crate::types::{Attribution, Place};
 
 /// A tile record as the client keeps it: `value`, `uri` and `importance`, nothing else.
 #[derive(Clone, Debug, PartialEq)]
@@ -14,6 +14,14 @@ pub(crate) struct TileRecord {
     pub(crate) value: Place,
     pub(crate) uri: Option<String>,
     pub(crate) importance: Option<i64>,
+}
+
+/// A tile as the client keeps it once parsed: its usable records and its attribution (contract §1).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Tile {
+    pub(crate) records: Vec<TileRecord>,
+    /// Empty when the payload has none, or it is not a list.
+    pub(crate) attribution: Vec<Attribution>,
 }
 
 struct Entry {

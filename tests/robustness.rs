@@ -269,6 +269,17 @@ mod tile_attribution {
     }
 
     both! {
+        fn does_not_let_a_non_2xx_tile_contribute_the_attribution_its_body_carries(kind: Kind) {
+            let fake = tile_serving("");
+            let body = json!({ "records": [good()], "attribution": [{ "dataset": "d", "collection": "c" }] });
+            fake.raw(TILE, 503, body.to_string());
+            let result = kind.client(&fake).ok(REGION, overture_options());
+            assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 1));
+            assert_eq!(result.attribution, vec![]);
+        }
+    }
+
+    both! {
         fn does_not_let_a_tile_whose_body_fails_to_decode_contribute_its_attribution(kind: Kind) {
             // A 200 whose body has no records array is a failed tile, though its attribution is readable.
             let result = search(kind, json!({ "attribution": [{ "dataset": "d", "collection": "c" }] }));

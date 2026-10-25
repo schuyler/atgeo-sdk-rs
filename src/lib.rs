@@ -4,6 +4,7 @@
     doc = "A client for the atgeo gazetteer that searches places without telling the server what you searched for. See the README."
 )]
 
+mod attribution;
 mod cache;
 mod client;
 mod engine;
