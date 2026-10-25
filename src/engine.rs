@@ -7,7 +7,8 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
-use crate::cache::{CachedTile, TileCache, TileRecord, TtlCache};
+use crate::attribution::{collection_prefix, in_collection, merge};
+use crate::cache::{CachedTile, Tile, TileCache, TileRecord, TtlCache};
 use crate::error::{ArgumentError, DecodingError, Error};
 use crate::locations::{in_region, locate, record_key};
 use crate::rank::{cmp_utf16, rank};
@@ -15,22 +16,24 @@ use crate::region::{center, query_bboxes, validate};
 use crate::text::{Query, normalize};
 use crate::transport::{BoxError, HttpResponse};
 use crate::types::{
-    PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, TileCounts, TileFailure,
-    TileFailureKind, Tileset,
+    Attribution, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, TileCounts,
+    TileFailure, TileFailureKind, Tileset,
 };
 use crate::wire::{self, TileList};
 use crate::xrpc;
 
+fn into_tile(payload: wire::TilePayload) -> Arc<Tile> {
+    Arc::new(Tile { records: payload.records, attribution: payload.attribution.unwrap_or_default() })
+}
+
 pub(crate) const DEFAULT_SERVER: &str = "https://places.atgeo.org";
 pub(crate) const DEFAULT_CACHE_BUDGET_BYTES: u64 = 50 * 1024 * 1024;
-const DEFAULT_DATASET: &str = "overturemaps.org";
-const DEFAULT_COLLECTION: &str = "place";
 pub(crate) const MAX_TILES_IN_FLIGHT: usize = 8;
 
 pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
 /// Records of a tile a search used, with the generation of the cache entry they came from.
-pub(crate) type Used = (u64, Arc<[TileRecord]>);
+pub(crate) type Used = (u64, Arc<Tile>);
 
 /// What one tile of a search came to: its records, or why it failed.
 pub(crate) type Slot = Result<Used, TileFailure>;
@@ -164,12 +167,8 @@ impl Engine {
         }
         self.check_server()?;
 
-        let dataset = options.dataset.as_deref().unwrap_or(DEFAULT_DATASET);
-        let collection = match (&options.collection, &options.dataset) {
-            (Some(c), _) => Some(c.as_str()),
-            (None, None) => Some(DEFAULT_COLLECTION),
-            (None, Some(_)) => None,
-        };
+        let dataset = options.dataset.as_str();
+        let collection = options.collection.as_deref();
         let now = self.now();
         let lists = query_bboxes(&region)
             .into_iter()
@@ -187,13 +186,7 @@ impl Engine {
                 ListStep::Fetch { key, url }
             })
             .collect();
-        Ok(Plan {
-            region,
-            query,
-            sort: options.sort,
-            prefix: collection.map(|c| format!("urn:atgeo:{dataset}:{c}:")),
-            lists,
-        })
+        Ok(Plan { region, query, sort: options.sort, prefix: collection.map(|c| collection_prefix(dataset, c)), lists })
     }
 
     /// Reads a getTiles answer and caches it for an hour; a failure caches nothing.
@@ -219,13 +212,13 @@ impl Engine {
 
     /// A cached tile's records. Only a body that was parsed once can be here, so an error is one a
     /// deterministic parser cannot give; it is reported as a `decode` failure all the same (§4.4).
-    fn records_of(&self, tile: &CachedTile) -> Result<Arc<[TileRecord]>, DecodingError> {
+    fn tile_of(&self, tile: &CachedTile) -> Result<Arc<Tile>, DecodingError> {
         if let Some((generation, records)) = lock(&self.parsed).get(&tile.url) {
             if *generation == tile.generation {
                 return Ok(records.clone());
             }
         }
-        wire::tile_records(&tile.body).map(Arc::from)
+        wire::tile_payload(&tile.body).map(into_tile)
     }
 
     /// Called when a worker reaches the URL, as the reference consults the cache, so that recency is
@@ -234,7 +227,7 @@ impl Engine {
         let cached = lock(&self.tiles).get(url);
         if let Some(tile) = cached {
             return TileStep::Done(
-                self.records_of(&tile)
+                self.tile_of(&tile)
                     .map(|r| (tile.generation, r))
                     .map_err(|e| TileFailure::new(url, TileFailureKind::Decode, None, e.into())),
             );
@@ -256,11 +249,13 @@ impl Engine {
             let error = Error::Atgeo(wire::error_from(response.status, &response.body));
             return Err(fail(TileFailureKind::Status, Some(response.status), error));
         }
-        let records: Arc<[TileRecord]> =
-            wire::tile_records(&response.body).map_err(|e| fail(TileFailureKind::Decode, None, e.into()))?.into();
-        let keys = records.iter().filter_map(|r| record_key(r).map(str::to_owned)).collect();
+        // A tile whose body does not decode fails here, before anything is stored, so its attribution is
+        // never read into a result (§4.10).
+        let tile =
+            into_tile(wire::tile_payload(&response.body).map_err(|e| fail(TileFailureKind::Decode, None, e.into()))?);
+        let keys = tile.records.iter().filter_map(|r| record_key(r).map(str::to_owned)).collect();
         let generation = lock(&self.tiles).insert(url, response.body.into(), keys);
-        Ok((generation, records))
+        Ok((generation, tile))
     }
 
     /// The slots the workers finished, by index, in URL order.
@@ -289,23 +284,23 @@ impl Engine {
         }
         let (fetched, failed) = (used.len(), tile_failures.len());
 
+        // Every used tile counts, whether or not any of its records survives below (§4.10).
+        let attribution = merge(used.iter().map(|(_, (_, tile))| tile.attribution.as_slice()));
+
         let mut seen: HashSet<&str> = HashSet::new();
-        let mut kept: Vec<&TileRecord> = Vec::new();
-        for (_, (_, records)) in &used {
-            for r in records.iter() {
+        let mut kept: Vec<(&TileRecord, &[Attribution])> = Vec::new();
+        for (_, (_, tile)) in &used {
+            for r in &tile.records {
                 // dedupe picks a winner before the region filter runs (§4.6).
                 let key = record_key(r);
                 if key.is_some_and(|k| !seen.insert(k)) {
                     continue;
                 }
-                if let Some(prefix) = &plan.prefix {
-                    let origin = r.value.get("origin").and_then(|o| o.as_str());
-                    if !origin.is_some_and(|o| o.starts_with(prefix.as_str())) {
-                        continue;
-                    }
+                if plan.prefix.as_deref().is_some_and(|prefix| !in_collection(&r.value, prefix)) {
+                    continue;
                 }
                 if in_region(&locate(&r.value), &plan.region) {
-                    kept.push(r);
+                    kept.push((r, tile.attribution.as_slice()));
                 }
             }
         }
@@ -313,7 +308,14 @@ impl Engine {
 
         *lock(&self.parsed) = used.into_iter().collect();
 
-        SearchResult { places, complete: failed == 0, overview, tiles: TileCounts { fetched, failed }, tile_failures }
+        SearchResult {
+            places,
+            complete: failed == 0,
+            overview,
+            tiles: TileCounts { fetched, failed },
+            tile_failures,
+            attribution,
+        }
     }
 
     // --- getPlace and the describe calls --------------------------------------------------------
@@ -323,12 +325,13 @@ impl Engine {
         self.check_server()?;
         let found = lock(&self.tiles).find(origin);
         if let Some(tile) = found {
-            if let Ok(records) = self.records_of(&tile) {
-                if let Some(r) = records.iter().find(|r| record_key(r) == Some(origin)) {
+            if let Ok(tile) = self.tile_of(&tile) {
+                if let Some(r) = tile.records.iter().find(|r| record_key(r) == Some(origin)) {
                     return Ok(Step::Done(PlaceRecord {
                         origin: origin.to_owned(),
                         place: r.value.clone(),
                         importance: r.importance,
+                        attribution: tile.attribution.clone(),
                     }));
                 }
             }
@@ -342,8 +345,13 @@ impl Engine {
         response: Result<HttpResponse, BoxError>,
     ) -> Result<PlaceRecord, Error> {
         let body = Self::checked(response.map_err(Error::Transport)?)?;
-        let (record, importance) = wire::place_view(&body)?;
-        Ok(PlaceRecord { origin: origin.to_owned(), place: Arc::new(record), importance })
+        let view = wire::place_view(&body)?;
+        Ok(PlaceRecord {
+            origin: origin.to_owned(),
+            place: Arc::new(view.value),
+            importance: view.importance,
+            attribution: view.attribution,
+        })
     }
 
     pub(crate) fn service_step(&self) -> Result<Step<ServiceDescription>, Error> {

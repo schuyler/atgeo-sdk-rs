@@ -2,10 +2,11 @@
 
 use std::cmp::Ordering;
 
+use crate::attribution::collection_of;
 use crate::cache::TileRecord;
 use crate::locations::{Locations, distance_to, locate, record_key};
 use crate::text::Query;
-use crate::types::{SearchHit, SortMode};
+use crate::types::{Attribution, SearchHit, SortMode};
 
 const JW_THRESHOLD: f64 = 0.6;
 
@@ -69,14 +70,14 @@ fn by_origin(a: &Ranked, b: &Ranked) -> Ordering {
 /// Scores, filters on the text threshold, and sorts records that already passed the region filter.
 /// `query` is `None` without text.
 pub(crate) fn rank<'a>(
-    records: impl IntoIterator<Item = &'a TileRecord>,
+    records: impl IntoIterator<Item = (&'a TileRecord, &'a [Attribution])>,
     center: (f64, f64),
     query: Option<&Query>,
     sort: SortMode,
 ) -> Vec<SearchHit> {
     let mut ranked: Vec<Ranked> = records
         .into_iter()
-        .filter_map(|record| {
+        .filter_map(|(record, attribution)| {
             let score = query.map(|q| q.score(&record.value));
             if score.is_some_and(|s| s < JW_THRESHOLD) {
                 return None;
@@ -87,6 +88,7 @@ pub(crate) fn rank<'a>(
             Some(Ranked {
                 hit: SearchHit {
                     origin: record_key(record).map(str::to_owned),
+                    collection: collection_of(&record.value, attribution),
                     place: record.value.clone(),
                     importance: record.importance,
                     distance,

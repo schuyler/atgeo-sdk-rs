@@ -175,7 +175,7 @@ pub(crate) fn distance_to(locations: &Locations, lat: f64, lon: f64) -> Option<f
 
 pub(crate) fn in_region(locations: &Locations, region: &Region) -> bool {
     match *region {
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat } => {
+        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => {
             let segments = lon_segments(min_lon, max_lon);
             if let Some((lat, lon)) = locations.point {
                 return covers(min_lat, max_lat, segments.as_slice(), lat, lon);

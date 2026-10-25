@@ -50,6 +50,7 @@ mod get_place {
             assert_eq!(found.origin, place_origin("r1"));
             assert_eq!(*found.place, map(&value()));
             assert_eq!(found.importance, Some(80));
+            assert_eq!(attribution_json(&found.attribution), overture_attribution());
         }
     }
 
@@ -64,7 +65,7 @@ mod get_place {
             let fake = setup();
             let network = kind.client(&fake).get_place(&place_origin("r1")).unwrap();
             let fresh = kind.client(&fake);
-            fresh.ok(NEAR_FERRY, SearchOptions::new());
+            fresh.ok(NEAR_FERRY, overture_options());
             let before = fake.request_count();
             assert_eq!(fresh.get_place(&place_origin("r1")).unwrap(), network);
             assert_eq!(fake.request_count(), before);
@@ -75,7 +76,7 @@ mod get_place {
         fn makes_no_request_for_the_origin_of_a_hit_from_an_earlier_search(kind: Kind) {
             let fake = setup();
             let client = kind.client(&fake);
-            let result = client.ok(NEAR_FERRY, SearchOptions::new());
+            let result = client.ok(NEAR_FERRY, overture_options());
             let before = fake.request_count();
             client.get_place(result.places[0].origin.as_deref().unwrap()).unwrap();
             assert_eq!(fake.request_count(), before);
@@ -90,13 +91,14 @@ mod get_place {
                 vec![record(uri_only.clone(), Some(4), Some("https://example.org/r/u"))],
             )])]);
             let client = kind.client(&fake);
-            let result = client.ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = client.ok(REGION, SearchOptions::new("overturemaps.org"));
             assert_eq!(result.places[0].origin.as_deref(), Some("https://example.org/r/u"));
             fake.go_offline();
             let found = client.get_place("https://example.org/r/u").unwrap();
             assert_eq!(found.origin, "https://example.org/r/u");
             assert_eq!(*found.place, map(&uri_only));
             assert_eq!(found.importance, Some(4));
+            assert_eq!(attribution_json(&found.attribution), overture_attribution());
         }
     }
 
@@ -106,6 +108,123 @@ mod get_place {
                 let e = kind.client(&setup()).get_place(&unknown).unwrap_err();
                 assert_eq!(code_of(&e), "PlaceNotFound", "{unknown}");
             }
+        }
+    }
+}
+
+// describe("getPlace"), continued: attribution as served (contract §9)
+mod get_place_attribution {
+    use super::get_place::{NEAR_FERRY, value};
+    use super::*;
+
+    fn references() -> Vec<Value> {
+        vec![
+            json!({ "dataset": "z.example", "collection": "c" }),
+            json!({ "dataset": "a.example", "collection": "c", "release": "1" }),
+            json!({ "dataset": "a.example", "collection": "c", "release": "2" }),
+        ]
+    }
+
+    /// The tileset's collection entry, then its references: what a tile carries and getPlace answers with.
+    fn served() -> Value {
+        let mut list = vec![json!({
+            "dataset": "overturemaps.org", "collection": "place",
+            "licenses": ["https://l.example/1"], "release": "r0",
+        })];
+        list.extend(references());
+        Value::Array(list)
+    }
+
+    fn with_references() -> FakeServer {
+        let mut t = overture(vec![tile(&url("a"), vec![record(value(), Some(80), None)])]);
+        t.collections = vec![served()[0].clone()];
+        t.references = Some(references());
+        FakeServer::with_tilesets(vec![t])
+    }
+
+    both! {
+        fn returns_the_tiles_attribution_from_the_cache_in_served_order_duplicates_included_unsorted(kind: Kind) {
+            let fake = with_references();
+            let client = kind.client(&fake);
+            client.ok(NEAR_FERRY, overture_options());
+            fake.go_offline();
+            let answer = client.get_place(&place_origin("r1")).unwrap();
+            assert_eq!(attribution_json(&answer.attribution), served());
+        }
+    }
+
+    both! {
+        fn returns_the_responses_attribution_from_the_network_in_served_order_duplicates_included_unsorted(kind: Kind) {
+            let fake = with_references();
+            let answer = kind.client(&fake).get_place(&place_origin("r1")).unwrap();
+            assert!(fake.requests().iter().any(|r| nsid(r) == "org.atgeo.getPlace"));
+            assert_eq!(attribution_json(&answer.attribution), served());
+        }
+    }
+
+    both! {
+        fn changing_a_get_place_answers_attribution_changes_nothing_cached(kind: Kind) {
+            let fake = with_references();
+            let client = kind.client(&fake);
+            client.ok(NEAR_FERRY, overture_options());
+            fake.go_offline();
+            let mut answer = client.get_place(&place_origin("r1")).unwrap();
+            answer.attribution[0].licenses.as_mut().unwrap().push("https://l.example/changed".into());
+            answer.attribution[0].release = Some("x".into());
+            answer.attribution.reverse();
+            assert_eq!(attribution_json(&client.get_place(&place_origin("r1")).unwrap().attribution), served());
+        }
+    }
+
+    both! {
+        fn changing_a_network_get_place_answers_attribution_changes_nothing_a_later_search_returns(kind: Kind) {
+            let fake = with_references();
+            let client = kind.client(&fake);
+            let mut answer = client.get_place(&place_origin("r1")).unwrap();
+            answer.attribution[0].licenses.as_mut().unwrap().push("https://l.example/changed".into());
+            answer.attribution.clear();
+            let result = client.ok(NEAR_FERRY, overture_options());
+            assert_eq!(attribution_json(&client.get_place(&place_origin("r1")).unwrap().attribution), served());
+            assert_eq!(result.attribution.len(), 3, "the references of a, z and the collection, deduped by pair");
+        }
+    }
+}
+
+// describe("a search result's attribution"), from frozenPlace.test.ts: the app's own copy.
+mod a_search_results_attribution {
+    use super::*;
+
+    both! {
+        fn is_the_apps_own_changing_it_leaves_the_next_searchs_alone(kind: Kind) {
+            let licenses = ["https://l.example/1"];
+            let mut t = overture(vec![tile(&url("a"), vec![record(simple("p", "P", vec![point(37.775, -122.415)]), Some(5), None)])]);
+            t.collections = vec![json!({
+                "dataset": "overturemaps.org", "collection": "place", "release": "2026-01-01", "licenses": licenses,
+            })];
+            let fake = FakeServer::with_tilesets(vec![t]);
+            let client = kind.client(&fake);
+            let mut r1 = client.ok(REGION, overture_options());
+            let original = attribution_json(&r1.attribution);
+            assert_eq!(original[0]["licenses"], json!(licenses));
+            r1.attribution[0].licenses.as_mut().unwrap().push("https://l.example/changed".into());
+            r1.attribution[0].release = Some("changed".into());
+            r1.attribution.reverse();
+            let r2 = client.ok(REGION, overture_options());
+            assert_eq!(attribution_json(&r2.attribution), original);
+        }
+    }
+
+    both! {
+        fn is_the_apps_own_even_when_the_second_search_is_answered_offline_from_the_cache(kind: Kind) {
+            let mut t = overture(vec![tile(&url("a"), vec![record(simple("p", "P", vec![point(37.775, -122.415)]), None, None)])]);
+            t.collections = vec![json!({ "dataset": "overturemaps.org", "collection": "place", "licenses": ["l"] })];
+            let fake = FakeServer::with_tilesets(vec![t]);
+            let client = kind.client(&fake);
+            let mut r1 = client.ok(REGION, overture_options());
+            let original = attribution_json(&r1.attribution);
+            r1.attribution[0].licenses.as_mut().unwrap()[0] = "changed".into();
+            fake.go_offline();
+            assert_eq!(attribution_json(&client.ok(REGION, overture_options()).attribution), original);
         }
     }
 }
@@ -125,6 +244,7 @@ mod describe {
                 "dataset": "openstreetmap.org", "collection": "node",
                 "licenses": ["https://opendatacommons.org/licenses/odbl/"],
             })]),
+            overview: None,
             tiles: vec![],
         }
     }
@@ -168,6 +288,25 @@ mod describe {
             assert_eq!(refs[0].licenses, Some(vec!["https://opendatacommons.org/licenses/odbl/".to_owned()]));
             assert_eq!(t.published_at, None);
             assert_eq!(t.extent, None);
+        }
+    }
+
+    both! {
+        fn describe_service_passes_the_servers_tile_budget_through(kind: Kind) {
+            let service = kind.client(&fake()).describe_service().unwrap();
+            assert_eq!(service.max_tiles, Some(50));
+        }
+    }
+
+    both! {
+        fn describe_tileset_passes_the_overview_through(kind: Kind) {
+            let mut with_overview = osm();
+            with_overview.overview = Some(1234);
+            let fake = FakeServer::with_tilesets(vec![with_overview]);
+            let tileset = kind.client(&fake).describe_tileset("osm").unwrap();
+            assert_eq!(tileset.overview.as_ref().map(|o| o.records), Some(Some(1234)));
+            // A tileset without an overview band has none.
+            assert_eq!(kind.client(&self::fake()).describe_tileset("osm").unwrap().overview, None);
         }
     }
 
@@ -218,7 +357,7 @@ mod search_places_results {
 
     both! {
         fn returns_origin_the_wire_place_importance_meters_distance_and_null_score_without_text(kind: Kind) {
-            let result = setup(kind).ok(CIRCLE, SearchOptions::new());
+            let result = setup(kind).ok(CIRCLE, overture_options());
             let cafe = result.places.iter().find(|h| h.origin == Some(place_origin("cafe"))).unwrap();
             assert_eq!(*cafe.place, map(&records()[0]["value"]));
             assert!(!cafe.place.contains_key("importance"));
@@ -234,7 +373,7 @@ mod search_places_results {
 
     both! {
         fn gives_distance_0_to_a_bbox_containing_the_center(kind: Kind) {
-            let result = setup(kind).ok(CIRCLE, SearchOptions::new());
+            let result = setup(kind).ok(CIRCLE, overture_options());
             let division = result.places.iter().find(|h| h.origin == Some(place_origin("division"))).unwrap();
             assert_eq!(division.distance, 0.0);
             let b = division.location().bbox.unwrap();
@@ -244,7 +383,7 @@ mod search_places_results {
 
     both! {
         fn returns_a_numeric_score_with_text(kind: Kind) {
-            let result = setup(kind).ok(CIRCLE, SearchOptions::new().text("Zanzibar Cafe"));
+            let result = setup(kind).ok(CIRCLE, overture_options().text("Zanzibar Cafe"));
             let cafe = result.places.iter().find(|h| h.origin == Some(place_origin("cafe"))).unwrap();
             assert!((cafe.score.unwrap() - 1.0).abs() < 0.005);
             assert!(result.places.iter().all(|h| h.score.is_some()));
@@ -254,8 +393,8 @@ mod search_places_results {
     both! {
         fn treats_text_that_normalizes_to_empty_as_no_text(kind: Kind) {
             let client = setup(kind);
-            let none = client.ok(CIRCLE, SearchOptions::new());
-            let blank = client.ok(CIRCLE, SearchOptions::new().text("   "));
+            let none = client.ok(CIRCLE, overture_options());
+            let blank = client.ok(CIRCLE, overture_options().text("   "));
             assert!(!blank.places.is_empty());
             assert_eq!(blank, none);
             assert!(blank.places.iter().all(|h| h.score.is_none()));
@@ -284,7 +423,7 @@ mod ordering_among_places_containing_the_center {
             // Center is exactly (45, 180). The small box reaches it as lon -180 / 180.
             let small = simple("small", "Small", vec![bbox_location(50.0, 40.0, -170.0, -180.0)]);
             let large = simple("large", "Large", vec![bbox_location(55.0, 35.0, -160.0, 160.0)]);
-            let order = ids(kind, vec![(small, 1), (large, 9)], Region::bbox(170.0, 40.0, -170.0, 50.0), SearchOptions::new().sort(SortMode::Distance));
+            let order = ids(kind, vec![(small, 1), (large, 9)], Region::bbox(170.0, 40.0, -170.0, 50.0), overture_options().sort(SortMode::Distance));
             assert_eq!(order, ["small", "large"]);
         }
     }
@@ -294,7 +433,7 @@ mod ordering_among_places_containing_the_center {
             for sort in [SortMode::Fused, SortMode::Similarity] {
                 let large = simple("a-large", "Same", vec![bbox_location(50.0, 40.0, 15.0, 5.0)]);
                 let small = simple("b-small", "Same", vec![bbox_location(46.0, 44.0, 11.0, 9.0)]);
-                let order = ids(kind, vec![(small, 5), (large, 5)], Region::circle(45.0, 10.0, 1000.0), SearchOptions::new().text("Same").sort(sort));
+                let order = ids(kind, vec![(small, 5), (large, 5)], Region::circle(45.0, 10.0, 1000.0), overture_options().text("Same").sort(sort));
                 assert_eq!(order, ["a-large", "b-small"], "{sort:?}");
             }
         }
@@ -309,7 +448,7 @@ mod ordering_among_places_containing_the_center {
                     (simple("pin", "Pin", vec![point(45.0, 10.0)]), 1),
                 ],
                 Region::circle(45.0, 10.0, 1000.0),
-                SearchOptions::new().sort(SortMode::Distance),
+                overture_options().sort(SortMode::Distance),
             );
             assert_eq!(order, ["pin", "box"]);
         }
@@ -337,6 +476,7 @@ mod datasets_and_collections {
                 .map(|c| json!({ "dataset": "openstreetmap.org", "collection": c }))
                 .collect(),
             references: None,
+            overview: None,
             tiles: vec![tile(
                 &url("osm"),
                 vec![
@@ -362,9 +502,9 @@ mod datasets_and_collections {
         fn keys_the_tile_list_on_dataset_and_collection(kind: Kind) {
             let fake = setup();
             let client = kind.client(&fake);
-            client.ok(REGION, SearchOptions::new().dataset("openstreetmap.org").collection("way"));
-            client.ok(REGION, SearchOptions::new().dataset("openstreetmap.org"));
-            client.ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            client.ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            client.ok(REGION, SearchOptions::new("openstreetmap.org"));
+            client.ok(REGION, SearchOptions::new("overturemaps.org"));
             let keys: Vec<String> = fake
                 .tile_list_requests()
                 .iter()
@@ -380,9 +520,10 @@ mod datasets_and_collections {
                 slug: Some("osm".into()),
                 collections: ["way", "wayside"].iter().map(|c| json!({ "dataset": "openstreetmap.org", "collection": c })).collect(),
                 references: None,
+                overview: None,
                 tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772)), rec(osm_place("wayside", "9", 37.773))])],
             }]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("openstreetmap.org").collection("way"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(origins(&result), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
         }
     }
@@ -390,7 +531,7 @@ mod datasets_and_collections {
     both! {
         fn searches_a_whole_dataset_when_only_the_dataset_is_named(kind: Kind) {
             let fake = setup();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("openstreetmap.org"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org"));
             let mut got: Vec<String> = result.places.iter().map(|h| h.origin.clone().unwrap()).collect();
             got.sort();
             assert_eq!(got, [
@@ -407,27 +548,128 @@ mod datasets_and_collections {
     both! {
         fn filters_to_one_collection_dropping_records_with_no_origin(kind: Kind) {
             let fake = setup();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("openstreetmap.org").collection("way"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(origins(&result), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
             assert_eq!(param(&first(&fake), "collection").as_deref(), Some("way"));
         }
     }
 
+    // The dataset is required and has no default (contract §4.1). In Rust a missing or non-string dataset, and
+    // a collection named without one, cannot be written (`SearchOptions::new` takes the dataset; see its
+    // compile_fail doctests), so what is left to test is that an empty one is a string like any other.
     both! {
-        fn defaults_to_overturemaps_org_place_when_nothing_is_named(kind: Kind) {
+        fn sends_an_empty_dataset_to_the_server(kind: Kind) {
             let fake = setup();
-            kind.client(&fake).ok(REGION, SearchOptions::new());
-            assert_eq!(param(&first(&fake), "dataset").as_deref(), Some("overturemaps.org"));
-            assert_eq!(param(&first(&fake), "collection").as_deref(), Some("place"));
+            let e = kind.client(&fake).search(REGION, SearchOptions::new("")).unwrap_err();
+            assert!(matches!(e, Error::Atgeo(_)), "{e:?}");
+            let lists = fake.tile_list_requests();
+            assert_eq!(lists.len(), 1);
+            assert_eq!(param(&lists[0], "dataset").as_deref(), Some(""));
         }
     }
 
     both! {
-        fn takes_overturemaps_org_for_a_collection_named_alone(kind: Kind) {
-            let fake = setup();
-            let _ = kind.client(&fake).search(REGION, SearchOptions::new().collection("division"));
-            assert_eq!(param(&first(&fake), "dataset").as_deref(), Some("overturemaps.org"));
-            assert_eq!(param(&first(&fake), "collection").as_deref(), Some("division"));
+        fn gives_each_hit_the_collection_its_origin_names_by_prefix_and_none_to_a_hit_keyed_by_uri(kind: Kind) {
+            let result = kind.client(&setup()).ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let by_origin: std::collections::BTreeMap<String, Value> = result
+                .places
+                .iter()
+                .map(|h| (h.origin.clone().unwrap(), collection_json(&h.collection)))
+                .collect();
+            let c = |collection: &str| json!({ "dataset": "openstreetmap.org", "collection": collection });
+            assert_eq!(
+                by_origin,
+                std::collections::BTreeMap::from([
+                    ("urn:atgeo:openstreetmap.org:node:1".to_owned(), c("node")),
+                    ("urn:atgeo:openstreetmap.org:way:2".to_owned(), c("way")),
+                    ("urn:atgeo:openstreetmap.org:relation:3".to_owned(), c("relation")),
+                    ("https://example.org/r/u".to_owned(), Value::Null),
+                ])
+            );
+        }
+    }
+
+    both! {
+        fn gives_way_and_wayside_hits_their_own_collections(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![FakeTileset {
+                slug: Some("osm".into()),
+                collections: ["way", "wayside"].iter().map(|c| json!({ "dataset": "openstreetmap.org", "collection": c })).collect(),
+                references: None,
+                overview: None,
+                tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772)), rec(osm_place("wayside", "9", 37.773))])],
+            }]);
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let mut got: Vec<(String, String)> = result
+                .places
+                .iter()
+                .map(|h| (h.origin.clone().unwrap(), h.collection.as_ref().unwrap().collection.clone()))
+                .collect();
+            got.sort();
+            assert_eq!(got, [
+                ("urn:atgeo:openstreetmap.org:way:2".to_owned(), "way".to_owned()),
+                ("urn:atgeo:openstreetmap.org:wayside:9".to_owned(), "wayside".to_owned()),
+            ]);
+        }
+    }
+
+    both! {
+        fn returns_the_union_of_the_tiles_attribution_references_included_sorted(kind: Kind) {
+            let fake = FakeServer::with_tilesets(vec![FakeTileset {
+                slug: Some("osm".into()),
+                collections: vec![
+                    json!({
+                        "dataset": "openstreetmap.org", "collection": "way", "release": "2026-01-01",
+                        "licenses": ["https://opendatacommons.org/licenses/odbl/"],
+                    }),
+                    json!({ "dataset": "openstreetmap.org", "collection": "relation" }),
+                ],
+                references: Some(vec![
+                    json!({ "dataset": "openstreetmap.org", "collection": "node", "source": "https://www.openstreetmap.org" }),
+                ]),
+                overview: None,
+                tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772))])],
+            }]);
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            assert_eq!(attribution_json(&result.attribution), json!([
+                { "dataset": "openstreetmap.org", "collection": "node", "source": "https://www.openstreetmap.org" },
+                { "dataset": "openstreetmap.org", "collection": "relation" },
+                {
+                    "dataset": "openstreetmap.org", "collection": "way", "release": "2026-01-01",
+                    "licenses": ["https://opendatacommons.org/licenses/odbl/"],
+                },
+            ]));
+        }
+    }
+
+    // Contract §4.7, §8: the match is on the start of `value.origin`. An origin that merely contains the prefix
+    // belongs to no collection of this dataset, so a filtered search drops it and a dataset-only search gives it
+    // no collection.
+    both! {
+        fn matches_the_start_of_the_origin_not_a_prefix_found_inside_it(kind: Kind) {
+            let embedded = "urn:atgeo:example.org:urn:atgeo:openstreetmap.org:way:5";
+            let fake = FakeServer::with_tilesets(vec![FakeTileset {
+                slug: Some("osm".into()),
+                collections: vec![json!({ "dataset": "openstreetmap.org", "collection": "way" })],
+                references: None,
+                overview: None,
+                tiles: vec![tile(
+                    &url("osm"),
+                    vec![
+                        rec(osm_place("way", "2", 37.772)),
+                        rec(place("e", "Embedded", vec![point(37.773, -122.415)], json!({ "origin": embedded }))),
+                    ],
+                )],
+            }]);
+            let client = kind.client(&fake);
+            let filtered = client.ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            assert_eq!(origins(&filtered), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
+            let whole = client.ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let got: std::collections::BTreeMap<_, _> =
+                whole.places.iter().map(|h| (h.origin.clone().unwrap(), h.collection.is_some())).collect();
+            assert_eq!(got, std::collections::BTreeMap::from([
+                ("urn:atgeo:openstreetmap.org:way:2".to_owned(), true),
+                (embedded.to_owned(), false),
+            ]));
         }
     }
 }
@@ -444,7 +686,7 @@ mod urls {
             {
                 let client = kind.with_server(&fake, server);
                 let is_invalid = |r: Result<(), Error>| matches!(r, Err(Error::InvalidArgument(ArgumentError::InvalidServer)));
-                assert!(is_invalid(client.search(REGION, SearchOptions::new()).map(drop)), "{server:?}");
+                assert!(is_invalid(client.search(REGION, overture_options()).map(drop)), "{server:?}");
                 assert!(is_invalid(client.get_place("urn:x").map(drop)), "{server:?}");
                 assert!(is_invalid(client.describe_service().map(drop)), "{server:?}");
                 assert!(is_invalid(client.describe_tileset("x").map(drop)), "{server:?}");
@@ -456,7 +698,7 @@ mod urls {
     both! {
         fn checks_the_region_before_the_server(kind: Kind) {
             let client = kind.with_server(&FakeServer::new(), "nope");
-            let e = client.search(Region::circle(f64::NAN, 0.0, 1.0), SearchOptions::new()).unwrap_err();
+            let e = client.search(Region::circle(f64::NAN, 0.0, 1.0), overture_options()).unwrap_err();
             assert!(matches!(e, Error::InvalidArgument(ArgumentError::InvalidRegion(_))), "{e:?}");
         }
     }
@@ -471,7 +713,7 @@ mod urls {
                     move |_| TilesFor::Urls(vec!["tiles.example/b.json".into(), "file:///etc/passwd".into(), good.clone()])
                 })
                 .build();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 2, false));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
             // In URL order, each as the tile list gave it, refused without a request.
@@ -503,7 +745,7 @@ mod urls {
                     }
                 })
                 .build();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 3, false));
             assert!(fake.requests().iter().all(|r| !r.contains('@')), "{:?}", fake.requests());
             let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.as_str(), f.kind, f.status)).collect();
@@ -531,7 +773,7 @@ mod urls {
             let fake = FakeServer::builder()
                 .tiles_for(|_| TilesFor::Urls(vec!["https://tiles.example/a b\t.json".into()]))
                 .build();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert!(fake.requests().contains(&"https://tiles.example/a%20b.json".to_owned()), "{:?}", fake.requests());
             assert_eq!(result.tiles.failed, 1); // the fake has no such tile: a 404
             // Reported by the URL as the tile list gave it, not as prepared.

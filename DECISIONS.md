@@ -15,7 +15,7 @@ This port was built to the Rust spec, [`docs/rust-sdk-spec.md`](https://github.c
 
 ## What the spec left open
 
-- **Fixtures** are vendored from atgeo-sdk-js `main` at `7b8a400`, the newest commit when the port was built. They are identical to the `a14961f` fixtures the Kotlin and Swift ports pinned.
+- **Fixtures** are vendored from atgeo-sdk-js at `2710a14`, the port contract revision of atgeo-sdk-js#43 (attribution, hit collections, a required dataset, the `getPlace` value shape). They were `7b8a400` when the port was built.
 - **The base branch.** The repository had no commits, so its `main` starts with the shared `LICENSE` alone, giving the port's pull request something to target.
 - **`rustfmt.toml`** sets `max_width = 120`, which keeps the contract's comparator chains and test tables on one line each.
 - **`publish = false`** in `Cargo.toml` until the beta ends (spec §2, distribution), so nothing reaches crates.io by accident.
@@ -42,3 +42,16 @@ These stay open for the maintainer (spec §8); the port does the conservative th
    - Not additive in one respect: `SearchResult` and `TileFailure` are no longer `UnwindSafe` or `RefUnwindSafe`, since the boxed transport error promises neither. They stay `Send + Sync`. Before 1.0, and with `AssertUnwindSafe` as the way round, that seemed better than hiding the error behind a wrapper.
    - Nothing is guarded beyond the four steps of §4.4, and nothing needs narrowing: the cache insert cannot fail and a panic propagates. serde_json's recursion limit makes deeply nested JSON a parse error, so a `Decode` tile. A slot is matched to its URL by index with a release-mode `assert!`, so a bug there panics rather than blaming the wrong tile.
    - No logging: no `log` or `tracing` dependency. The result carries everything a log line would.
+
+## The port contract revision (atgeo-sdk-js#43)
+
+The spec says `SearchOptions::new(dataset)`, without `Default` or a `.dataset()` setter, and is silent on the rest. The build chose:
+
+- **A required dataset is a type, not a check.** `new` takes `impl Into<String>`, so a missing or non-string dataset, and a collection named without one, don't compile; no `ArgumentError` variant was added. Three `compile_fail` doctests on `SearchOptions` keep it that way. An empty string is sent as given.
+- **`Attribution` is its own type.** A search entry is kept only if its `dataset` and `collection` are strings, so those are `String` in `Attribution`; the describe types' `CollectionAttribution` has every field optional and stays as it was. A hit's `collection` is a `CollectionKey { dataset, collection }`, not the entry, so it can't carry a `release` or `licenses`.
+- **Owned values for the copy rule.** Contract §9 lets a port hand out immutable values or copies. Entries are plain owned data, cloned out of the cache for every answer, so there is nothing to freeze. The cost is a clone of a short list per search and per cached `get_place`.
+- **The cache still holds bodies.** A parsed tile is now its records and its attribution, and a tile read again from its body reads the attribution again (contract §10). The tile's size is still its body length.
+- **No constructor for the new types.** They are `#[non_exhaustive]`, and `Attribution` derives `Default`, so a test can build one by assigning fields. Nobody has asked for more.
+- **The names of the new describe fields** follow the existing ones: `ServiceDescription::max_tiles` and `Tileset::overview` (`TilesetOverview { records }`).
+- **Bbox fields** are `west`, `south`, `east`, `north` (garganorn#16); `Region::bbox` still takes them in that order.
+- **`examples/e2e.rs`** is unchanged in what it checks; it can't pass until the server work in garganorn#27 is deployed, and it isn't skipped.

@@ -20,8 +20,8 @@ pub type Place = Arc<serde_json::Map<String, serde_json::Value>>;
 pub enum Region {
     /// A circle. Radius in metres.
     Circle { lat: f64, lon: f64, radius: f64 },
-    /// A bounding box, in degrees. `min_lon > max_lon` crosses the antimeridian.
-    Bbox { min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64 },
+    /// A bounding box, in degrees. `west > east` crosses the antimeridian.
+    Bbox { west: f64, south: f64, east: f64, north: f64 },
 }
 
 impl Region {
@@ -30,9 +30,10 @@ impl Region {
         Region::Circle { lat, lon, radius }
     }
 
-    /// A bounding box in degrees. `min_lon > max_lon` crosses the antimeridian.
-    pub const fn bbox(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat }
+    /// A bounding box in degrees, in the order of the `getTiles` bbox string. `west > east` crosses the
+    /// antimeridian.
+    pub const fn bbox(west: f64, south: f64, east: f64, north: f64) -> Self {
+        Region::Bbox { west, south, east, north }
     }
 }
 
@@ -53,33 +54,48 @@ pub enum SortMode {
 
 /// What to search for, besides the region.
 ///
+/// A search needs a dataset (contract §4.1), so there is no way to build the options without one: `new`
+/// takes it, and there is no `Default`. A missing dataset, and a collection named without one, are
+/// compile errors, and so is a dataset that is not a string.
+///
 /// ```
 /// # use atgeo::{SearchOptions, SortMode};
-/// let options = SearchOptions::new().text("Starbux").sort(SortMode::Distance);
+/// let options = SearchOptions::new("overturemaps.org").text("Starbux").sort(SortMode::Distance);
 /// ```
-#[derive(Clone, Debug, Default)]
+///
+/// ```compile_fail
+/// # use atgeo::SearchOptions;
+/// let options = SearchOptions::new(); // the dataset is required
+/// ```
+///
+/// ```compile_fail
+/// # use atgeo::SearchOptions;
+/// let options = SearchOptions::default(); // and has no default
+/// ```
+///
+/// ```compile_fail
+/// # use atgeo::SearchOptions;
+/// let options = SearchOptions::new(5); // and is a string
+/// ```
+#[derive(Clone, Debug)]
 pub struct SearchOptions {
+    pub(crate) dataset: String,
     pub(crate) text: Option<String>,
-    pub(crate) dataset: Option<String>,
     pub(crate) collection: Option<String>,
     pub(crate) sort: SortMode,
 }
 
 impl SearchOptions {
-    /// No text, the default dataset and collection, fused order.
-    pub fn new() -> Self {
-        Self::default()
+    /// Options for a search of `dataset`, such as `overturemaps.org` or `openstreetmap.org`: no text, no
+    /// collection (every collection of the dataset together), fused order. The dataset is required and has
+    /// no default. An empty string is sent as given, and the server answers for itself.
+    pub fn new(dataset: impl Into<String>) -> Self {
+        SearchOptions { dataset: dataset.into(), text: None, collection: None, sort: SortMode::default() }
     }
 
     /// Search text, matched fuzzily against each place's names. It never leaves the device.
     pub fn text(mut self, text: impl Into<String>) -> Self {
         self.text = Some(text.into());
-        self
-    }
-
-    /// The dataset to search, such as `openstreetmap.org`. Defaults to `overturemaps.org`.
-    pub fn dataset(mut self, dataset: impl Into<String>) -> Self {
-        self.dataset = Some(dataset.into());
         self
     }
 
@@ -118,6 +134,38 @@ pub struct SearchResult {
     /// in a result deserialized from one serialized before this field existed, which reads as empty.
     #[cfg_attr(feature = "serde", serde(default))]
     pub tile_failures: Vec<TileFailure>,
+    /// The credit due to every collection whose data the search's tiles hold (contract §4.10): the union
+    /// of the attribution of every tile the search used, one entry per `(dataset, collection)`, the lowest
+    /// tile URL's first, sorted by dataset and then collection. Always a list. The app's own copy.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attribution: Vec<Attribution>,
+}
+
+/// The collection a hit belongs to (contract §8): the `dataset` and `collection` of the attribution entry
+/// its origin names.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CollectionKey {
+    pub dataset: String,
+    pub collection: String,
+}
+
+/// A credit for one collection (`org.atgeo.defs#collectionAttribution`), as a search or `get_place` returns
+/// it (contract §1). An entry the client cannot credit to a collection, one without a string `dataset` and
+/// `collection`, is dropped when it is read, so those two are not optional here. Every other field is read
+/// on its own and is `None` when the server omits it or sends the wrong type. It is the app's own copy:
+/// changing it, or its `licenses`, changes nothing the client holds.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Attribution {
+    pub dataset: String,
+    pub collection: String,
+    pub release: Option<String>,
+    pub source: Option<String>,
+    pub attribution: Option<String>,
+    pub licenses: Option<Vec<String>>,
 }
 
 /// One tile a search could not use (contract §4.4).
@@ -210,6 +258,9 @@ pub struct TileCounts {
 pub struct SearchHit {
     /// The place's identity: its `origin`, else the tile record's `uri`, else `None`.
     pub origin: Option<String>,
+    /// The collection the hit belongs to, matched against its tile's attribution (contract §8); `None`
+    /// when no entry matches, as for a hit keyed by its `uri`.
+    pub collection: Option<CollectionKey>,
     /// The record value as served.
     pub place: Place,
     /// The record's importance, relative to its tileset; larger is more important.
@@ -243,6 +294,10 @@ pub struct PlaceRecord {
     /// The record value as served.
     pub place: Place,
     pub importance: Option<i64>,
+    /// The collections the place's data comes from, as served and in served order, duplicates included
+    /// and not sorted (contract §9); empty when the source has none. The app's own copy.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attribution: Vec<Attribution>,
 }
 
 impl PlaceRecord {
@@ -297,6 +352,8 @@ pub struct PlaceBox {
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ServiceDescription {
     pub did: Option<String>,
+    /// The server's tile budget. Informational: tile zooms are adaptive.
+    pub max_tiles: Option<i64>,
     pub tilesets: Vec<ServedTileset>,
 }
 
@@ -374,6 +431,18 @@ pub struct Tileset {
     pub extent: Option<Extent>,
     pub collections: Vec<CollectionInfo>,
     pub references: Option<Vec<CollectionAttribution>>,
+    /// The tileset's overview band, when it has one.
+    pub overview: Option<TilesetOverview>,
+}
+
+/// A tileset's overview band.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct TilesetOverview {
+    /// The number of records in the band.
+    pub records: Option<i64>,
 }
 
 /// A tileset's extent, its edges as served (decimal degrees, as strings).
@@ -465,6 +534,7 @@ mod tests {
             overview: false,
             tiles: TileCounts { fetched: 0, failed: 1 },
             tile_failures: vec![failure],
+            attribution: Vec::new(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains(r#""tile_failures":[{"url":"https://t/a","kind":"status","status":503}]"#), "{json}");

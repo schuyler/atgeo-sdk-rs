@@ -102,7 +102,7 @@ fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result
     log("describeTileset", format!("{slug}, {} collection(s)", tileset.collections.len()));
 
     let options = || {
-        let o = SearchOptions::new().dataset(c.dataset.clone());
+        let o = SearchOptions::new(c.dataset.clone());
         match &c.collection {
             Some(col) => o.collection(col.clone()),
             None => o,

@@ -4,6 +4,7 @@
     doc = "A client for the atgeo gazetteer that searches places without telling the server what you searched for. See the README."
 )]
 
+mod attribution;
 mod cache;
 mod client;
 mod engine;
@@ -26,9 +27,9 @@ pub use error::{ArgumentError, AtgeoError, DecodingError, Error};
 pub use transport::ReqwestTransport;
 pub use transport::{BoxError, HttpResponse, HttpTransport};
 pub use types::{
-    CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, Place, PlaceBox, PlaceLocation,
-    PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset, ServiceDescription,
-    SortMode, TileCounts, TileFailure, TileFailureKind, Tileset,
+    Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionKey, CollectionRef, Extent, Place,
+    PlaceBox, PlaceLocation, PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset,
+    ServiceDescription, SortMode, TileCounts, TileFailure, TileFailureKind, Tileset, TilesetOverview,
 };
 
 /// The server a client talks to unless told otherwise.

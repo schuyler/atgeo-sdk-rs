@@ -7,7 +7,7 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use atgeo::{AtgeoClient, Region, SearchOptions};
+use atgeo::{AtgeoClient, Region};
 use common::*;
 use futures_util::FutureExt;
 
@@ -25,7 +25,7 @@ fn twenty_tiles() -> FakeServer {
 both! {
     fn keeps_at_most_eight_tile_requests_in_flight(kind: Kind) {
         let fake = twenty_tiles();
-        let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+        let result = kind.client(&fake).ok(REGION, overture_options());
         assert_eq!(result.tiles.fetched, 20);
         assert_eq!(fake.peak_in_flight(), 8);
         assert_eq!(fake.in_flight(), 0);
@@ -38,7 +38,7 @@ both! {
             let tiles = (0..n).map(|i| tile(&url(&format!("t{i}")), vec![])).collect();
             let fake = FakeServer::with_tilesets(vec![overture(tiles)]);
             fake.delay_all(Duration::from_millis(20));
-            kind.client(&fake).ok(REGION, SearchOptions::new());
+            kind.client(&fake).ok(REGION, overture_options());
             assert_eq!(fake.peak_in_flight(), n, "{n} tiles");
         }
     }
@@ -48,8 +48,8 @@ both! {
     fn a_failed_get_tiles_caches_nothing_so_a_retry_asks_again(kind: Kind) {
         let fake = FakeServer::builder().tiles_for(|_| TilesFor::Error("InvalidBbox", "no")).build();
         let client = kind.client(&fake);
-        assert!(client.search(REGION, SearchOptions::new()).is_err());
-        assert!(client.search(REGION, SearchOptions::new()).is_err());
+        assert!(client.search(REGION, overture_options()).is_err());
+        assert!(client.search(REGION, overture_options()).is_err());
         assert_eq!(fake.tile_list_requests().len(), 2);
     }
 }
@@ -57,7 +57,7 @@ both! {
 #[test]
 fn the_async_client_starts_tile_requests_in_index_order() {
     let fake = twenty_tiles();
-    runtime().block_on(AtgeoClient::with_transport(fake.clone()).search_places(REGION, SearchOptions::new())).unwrap();
+    runtime().block_on(AtgeoClient::with_transport(fake.clone()).search_places(REGION, overture_options())).unwrap();
     let tiles: Vec<String> = fake.requests().into_iter().filter(|r| !r.contains("/xrpc/")).collect();
     let mut sorted = tiles.clone();
     sorted.sort();
@@ -71,7 +71,7 @@ fn dropping_a_search_drops_every_request_in_flight_and_starts_no_more() {
     let client = AtgeoClient::with_transport(fake.clone());
     let rt = runtime();
     let outcome = rt.block_on(async {
-        tokio::time::timeout(Duration::from_millis(50), client.search_places(REGION, SearchOptions::new())).await
+        tokio::time::timeout(Duration::from_millis(50), client.search_places(REGION, overture_options())).await
     });
     assert!(outcome.is_err(), "the search should still have been running");
     assert_eq!(fake.dropped(), 8);
@@ -95,8 +95,7 @@ fn the_first_get_tiles_error_returns_at_once_and_drops_the_other_half() {
     let client = AtgeoClient::with_transport(fake.clone());
     let rt = runtime();
     let started = rt.block_on(async { tokio::time::Instant::now() });
-    let e =
-        rt.block_on(client.search_places(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new())).unwrap_err();
+    let e = rt.block_on(client.search_places(Region::bbox(170.0, 10.0, -170.0, 20.0), overture_options())).unwrap_err();
     assert_eq!(code_of(&e), "BboxTooLarge");
     assert!(rt.block_on(async { tokio::time::Instant::now() }) - started < Duration::from_secs(1));
     assert_eq!(fake.dropped(), 1);
@@ -107,9 +106,9 @@ fn the_first_get_tiles_error_returns_at_once_and_drops_the_other_half() {
 fn a_search_answered_entirely_from_cache_completes_on_its_first_poll() {
     let fake = twenty_tiles();
     let client = AtgeoClient::with_transport(fake.clone());
-    let first = runtime().block_on(client.search_places(REGION, SearchOptions::new())).unwrap();
+    let first = runtime().block_on(client.search_places(REGION, overture_options())).unwrap();
     let before = fake.request_count();
-    let second = client.search_places(REGION, SearchOptions::new().text("P")).now_or_never();
+    let second = client.search_places(REGION, overture_options().text("P")).now_or_never();
     assert!(second.is_some(), "a fully cached search must not wait");
     assert_eq!(second.unwrap().unwrap().places.len(), first.places.len());
     assert_eq!(fake.request_count(), before);
@@ -121,7 +120,7 @@ fn a_search_answered_entirely_from_cache_completes_on_its_first_poll() {
 fn an_invalid_region_fails_on_the_first_poll() {
     let fake = FakeServer::new();
     let client = AtgeoClient::with_transport(fake.clone());
-    let r = client.search_places(Region::circle(91.0, 0.0, 1.0), SearchOptions::new()).now_or_never();
+    let r = client.search_places(Region::circle(91.0, 0.0, 1.0), overture_options()).now_or_never();
     assert!(matches!(r, Some(Err(atgeo::Error::InvalidArgument(_)))));
     assert_eq!(fake.request_count(), 0);
 }
@@ -137,7 +136,7 @@ fn the_client_is_send_and_sync_and_its_futures_are_send() {
     #[cfg(feature = "blocking")]
     assert_send_sync::<atgeo::blocking::AtgeoClient<FakeServer>>();
     let client = AtgeoClient::with_transport(FakeServer::new());
-    assert_send(&client.search_places(REGION, SearchOptions::new()));
+    assert_send(&client.search_places(REGION, overture_options()));
     assert_send(&client.get_place("x"));
     assert_send(&client.describe_service());
     assert_send(&client.describe_tileset("x"));
@@ -151,7 +150,7 @@ fn a_shared_client_runs_under_tokio_spawn() {
     let handles: Vec<_> = (0..4)
         .map(|_| {
             let client = client.clone();
-            rt.spawn(async move { client.search_places(REGION, SearchOptions::new()).await.map(|r| r.tiles.fetched) })
+            rt.spawn(async move { client.search_places(REGION, overture_options()).await.map(|r| r.tiles.fetched) })
         })
         .collect();
     for h in handles {
@@ -164,8 +163,8 @@ fn one_transport_can_serve_two_clients_through_a_reference() {
     let fake = twenty_tiles();
     let (a, b) = (AtgeoClient::with_transport(&fake), AtgeoClient::with_transport(Arc::new(fake.clone())));
     let rt = runtime();
-    rt.block_on(a.search_places(REGION, SearchOptions::new())).unwrap();
-    rt.block_on(b.search_places(REGION, SearchOptions::new())).unwrap();
+    rt.block_on(a.search_places(REGION, overture_options())).unwrap();
+    rt.block_on(b.search_places(REGION, overture_options())).unwrap();
     // Two clients share nothing: each fetched every tile.
     assert_eq!(fake.count_of(&url("t00")), 2);
 }
@@ -190,7 +189,7 @@ mod blocking {
     #[should_panic(expected = "transport panicked")]
     fn a_panic_in_a_worker_thread_reaches_the_caller() {
         let client = atgeo::blocking::AtgeoClient::with_transport(PanicsOnTiles(twenty_tiles()));
-        let _ = client.search_places(REGION, SearchOptions::new());
+        let _ = client.search_places(REGION, overture_options());
     }
 
     #[test]
@@ -208,7 +207,7 @@ mod blocking {
         fake.delay_containing("bbox=170.00", Duration::from_millis(100));
         let client = atgeo::blocking::AtgeoClient::with_transport(fake.clone());
         let started = std::time::Instant::now();
-        let e = client.search_places(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new()).unwrap_err();
+        let e = client.search_places(Region::bbox(170.0, 10.0, -170.0, 20.0), overture_options()).unwrap_err();
         assert!(started.elapsed() >= Duration::from_millis(100), "the delay applied, and both halves were awaited");
         assert_eq!(code_of(&e), "BboxTooLarge");
         assert_eq!(fake.dropped(), 0);

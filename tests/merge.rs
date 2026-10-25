@@ -10,7 +10,7 @@ use common::*;
 
 fn search(kind: Kind, records: Vec<Value>, region: Region) -> Vec<String> {
     let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("t"), records.into_iter().map(rec).collect())])]);
-    ids_sorted(&kind.client(&fake).ok(region, SearchOptions::new()))
+    ids_sorted(&kind.client(&fake).ok(region, overture_options()))
 }
 
 fn divisions(tiles: Vec<FakeTile>) -> FakeTileset {
@@ -18,6 +18,7 @@ fn divisions(tiles: Vec<FakeTile>) -> FakeTileset {
         slug: Some("overture-division".into()),
         collections: vec![json!({ "dataset": "overturemaps.org", "collection": "division" })],
         references: None,
+        overview: None,
         tiles,
     }
 }
@@ -52,14 +53,14 @@ mod deduplication {
                 tile(&url("a"), vec![rec(first()), rec(simple("a-only", "A", vec![point(37.772, -122.412)]))]),
                 tile(&url("b"), vec![rec(second()), rec(simple("b-only", "B", vec![point(37.773, -122.413)]))]),
             ])]);
-            assert_eq!(ids_sorted(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["a-only", "b-only", "dup"]);
+            assert_eq!(ids_sorted(&kind.client(&fake).ok(REGION, overture_options())), ["a-only", "b-only", "dup"]);
         }
     }
 
     both! {
         fn keeps_the_first_tiles_copy_in_the_default_order_too(kind: Kind) {
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![rec(first())]), tile(&url("b"), vec![rec(second())])])]);
-            assert_eq!(names(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["First copy"]);
+            assert_eq!(names(&kind.client(&fake).ok(REGION, overture_options())), ["First copy"]);
         }
     }
 
@@ -69,7 +70,7 @@ mod deduplication {
                 tile(&url("a"), vec![rec(division("d1", "Springfield"))]),
                 tile(&url("b"), vec![rec(division("d1", "Springfield"))]),
             ])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("overturemaps.org").collection("division"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org").collection("division"));
             assert_eq!(origins(&result), [Some("urn:atgeo:overturemaps.org:division:d1".to_owned())]);
         }
     }
@@ -85,7 +86,7 @@ mod deduplication {
                     ])])
                     .tiles_for(move |bbox| TilesFor::Urls(vec![if bbox.starts_with("170") { e.clone() } else { w.clone() }]))
                     .build();
-                let result = kind.client(&fake).ok(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new());
+                let result = kind.client(&fake).ok(Region::bbox(170.0, 10.0, -170.0, 20.0), overture_options());
                 assert_eq!(names(&result), [winner]);
             }
         }
@@ -95,7 +96,7 @@ mod deduplication {
         fn keeps_two_records_that_have_neither_origin_nor_uri(kind: Kind) {
             let anonymous = |name: &str| place("x", name, vec![point(37.775, -122.415)], json!({ "origin": null }));
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![rec(anonymous("One")), rec(anonymous("Two"))])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
             let mut got = names(&result);
             got.sort();
             assert_eq!(got, ["One", "Two"]);
@@ -107,7 +108,7 @@ mod deduplication {
         fn identifies_an_origin_less_record_by_its_uri(kind: Kind) {
             let value = place("x", "By uri", vec![point(37.775, -122.415)], json!({ "origin": null }));
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![record(value, None, Some("https://example.org/r/1"))])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some("https://example.org/r/1".to_owned())]);
         }
     }
@@ -124,7 +125,7 @@ mod ordering_ties {
                 &url("a"),
                 vec![same("x", json!({ "origin": null })), same("c", json!({})), same("a", json!({})), same("b", json!({}))],
             )])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some(place_origin("a")), Some(place_origin("b")), Some(place_origin("c")), None]);
         }
     }
@@ -238,7 +239,7 @@ mod region_filtering_circle {
             let (lat, radius) = (85.0, 370000.0);
             // Measured to the box edge along the centre's parallel: 379.9 km. The true nearest point is 357.1 km.
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("t"), vec![rec(simple("clipping", "Clipping", vec![bbox_location(89.0, 80.0, 50.0, 40.0)]))])])]);
-            let result = kind.client(&fake).ok(Region::circle(lat, 0.0, radius), SearchOptions::new());
+            let result = kind.client(&fake).ok(Region::circle(lat, 0.0, radius), overture_options());
             assert_eq!(ids_sorted(&result), ["clipping"]);
             assert!(result.places[0].distance <= radius);
         }
@@ -314,8 +315,8 @@ mod determinism {
                         fake.delay(&url(n), Duration::from_millis(rank as u64 * 15));
                     }
                     let options = match text {
-                        Some(t) => SearchOptions::new().text(t),
-                        None => SearchOptions::new(),
+                        Some(t) => overture_options().text(t),
+                        None => overture_options(),
                     };
                     outputs.push(kind.client(&fake).ok(REGION, options));
                 }
@@ -349,7 +350,7 @@ mod contract_edges {
                     TilesFor::Urls(vec!["https://t.example/\u{FF61}.json".into(), "https://t.example/\u{10000}.json".into()])
                 })
                 .build();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!(result.tiles.fetched, 2);
             assert_eq!(names(&result), ["Copy 10000"]);
         }
@@ -361,7 +362,7 @@ mod contract_edges {
                 &url("a"),
                 vec![record(here("\u{FF61}", "Same"), Some(5), None), record(here("\u{10000}", "Same"), Some(5), None)],
             )])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!(origins(&result), [Some(place_origin("\u{10000}")), Some(place_origin("\u{FF61}"))]);
         }
     }
@@ -372,7 +373,7 @@ mod contract_edges {
                 &url("a"),
                 vec![rec(here("dup", "First copy")), rec(here("dup", "Second copy"))],
             )])]);
-            assert_eq!(names(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["First copy"]);
+            assert_eq!(names(&kind.client(&fake).ok(REGION, overture_options())), ["First copy"]);
         }
     }
 
@@ -384,7 +385,7 @@ mod contract_edges {
                 tile(&url("a"), vec![rec(simple("dup", "Far copy", vec![point(40.0, -100.0)]))]),
                 tile(&url("b"), vec![rec(here("dup", "Near copy")), rec(here("other", "Other"))]),
             ])]);
-            assert_eq!(names(&kind.client(&fake).ok(REGION, SearchOptions::new())), ["Other"]);
+            assert_eq!(names(&kind.client(&fake).ok(REGION, overture_options())), ["Other"]);
         }
     }
 
@@ -396,7 +397,7 @@ mod contract_edges {
             ])])]);
             let result = kind
                 .client(&fake)
-                .ok(Region::circle(37.775, -122.415, 1000.0), SearchOptions::new().text("Same").sort(atgeo::SortMode::Similarity));
+                .ok(Region::circle(37.775, -122.415, 1000.0), overture_options().text("Same").sort(atgeo::SortMode::Similarity));
             assert_eq!(origins(&result), [Some(place_origin("b")), Some(place_origin("a"))]);
         }
     }
@@ -408,7 +409,7 @@ mod contract_edges {
                 rec(here("taaa", "Taaa")),
                 rec(here("sb", "Starbucks")),
             ])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().text("Starbux"));
+            let result = kind.client(&fake).ok(REGION, overture_options().text("Starbux"));
             assert_eq!(origins(&result), [Some(place_origin("sb"))]);
         }
     }
@@ -420,7 +421,7 @@ mod contract_edges {
                 record(here("a", "reading reading markt"), Some(1), None),
                 record(here("b", "reading readin marker"), Some(9), None),
             ])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new().text("Reading Terminal Market"));
+            let result = kind.client(&fake).ok(REGION, overture_options().text("Reading Terminal Market"));
             assert_eq!(origins(&result), [Some(place_origin("b")), Some(place_origin("a"))]);
             assert!(result.places[0].score.unwrap() < result.places[1].score.unwrap());
         }

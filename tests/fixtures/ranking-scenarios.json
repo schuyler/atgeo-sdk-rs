@@ -7,6 +7,8 @@
       "lon": -122.4194,
       "radius": 1000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Starbux",
     "records": [
       {
@@ -122,6 +124,8 @@
       "lon": -122.4194,
       "radius": 1000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Chipolte",
     "records": [
       {
@@ -219,6 +223,8 @@
       "lon": -122.46,
       "radius": 8000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Golden Gate Bridge",
     "records": [
       {
@@ -316,6 +322,8 @@
       "lon": -122.4194,
       "radius": 800
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "coffee",
     "records": [
       {
@@ -465,6 +473,8 @@
       "lon": 2.3326,
       "radius": 500
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "cafe",
     "records": [
       {
@@ -550,6 +560,8 @@
         48.22
       ]
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Munich",
     "records": [
       {
@@ -637,6 +649,8 @@
       "lon": -122.4194,
       "radius": 3000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Safeway",
     "records": [
       {
@@ -719,6 +733,8 @@
       "lon": -122.4194,
       "radius": 2000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "records": [
       {
         "value": {
@@ -815,6 +831,8 @@
       "lon": -122.4194,
       "radius": 1500
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "coffee",
     "sort": "distance",
     "records": [
@@ -917,6 +935,8 @@
       "lon": -122.46,
       "radius": 8000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Golden Gate Bridge",
     "sort": "similarity",
     "records": [
@@ -985,6 +1005,8 @@
       "lon": -122.4194,
       "radius": 1000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "text": "Zxqvw",
     "records": [
       {
@@ -1066,6 +1088,8 @@
       "lon": -75.16,
       "radius": 30000
     },
+    "dataset": "overturemaps.org",
+    "collection": "place",
     "sort": "distance",
     "records": [
       {

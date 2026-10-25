@@ -411,7 +411,13 @@ mod reqwest_cases {
     async fn a_url_with_a_space_and_a_tab_arrives_prepared() {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), SearchOptions::new()).await.unwrap();
+        let result = client
+            .search_places(
+                Region::bbox(0.0, 0.0, 0.01, 0.01),
+                SearchOptions::new("overturemaps.org").collection("place"),
+            )
+            .await
+            .unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_space_and_tab_prepared(&server);
     }
@@ -421,7 +427,7 @@ mod reqwest_cases {
     async fn reads_a_backslash_and_dot_segments_in_a_tile_url_as_whatwg_does() {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new().dataset("margins");
+        let options = SearchOptions::new("margins");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/a/b.json");
@@ -431,7 +437,7 @@ mod reqwest_cases {
     async fn sends_no_userinfo_that_follows_a_backslash() {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new().dataset("userinfo");
+        let options = SearchOptions::new("userinfo");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
     }
@@ -441,7 +447,7 @@ mod reqwest_cases {
         let server = Server::start(routes);
         let t = transport_with(Duration::from_secs(10)).max_body_bytes(CAP);
         let client = atgeo::AtgeoClient::with_transport(t).server(server.url(""));
-        let options = SearchOptions::new().dataset("failing");
+        let options = SearchOptions::new("failing");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_cap_and_404_reported(&server, &result);
     }
@@ -681,7 +687,7 @@ mod ureq_cases {
     fn sends_a_backslash_and_dot_segments_in_a_tile_url_as_given() {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new().dataset("margins");
+        let options = SearchOptions::new("margins");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/x/../a\\b.json");
@@ -691,7 +697,7 @@ mod ureq_cases {
     fn sends_no_userinfo_that_follows_a_backslash() {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new().dataset("userinfo");
+        let options = SearchOptions::new("userinfo");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
     }
@@ -701,7 +707,7 @@ mod ureq_cases {
         let server = Server::start(routes);
         let t = transport_with(Duration::from_secs(10), Duration::from_secs(20)).max_body_bytes(CAP);
         let client = atgeo::blocking::AtgeoClient::with_transport(t).server(server.url(""));
-        let options = SearchOptions::new().dataset("failing");
+        let options = SearchOptions::new("failing");
         let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_cap_and_404_reported(&server, &result);
     }
@@ -757,7 +763,12 @@ mod ureq_cases {
     fn a_url_with_a_space_and_a_tab_arrives_prepared() {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), SearchOptions::new()).unwrap();
+        let result = client
+            .search_places(
+                Region::bbox(0.0, 0.0, 0.01, 0.01),
+                SearchOptions::new("overturemaps.org").collection("place"),
+            )
+            .unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_space_and_tab_prepared(&server);
     }

@@ -31,7 +31,7 @@ use crate::types::{PlaceRecord, Region, SearchOptions, SearchResult, ServiceDesc
 ///
 /// let atgeo = AtgeoClient::new();
 /// let result = atgeo
-///     .search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new().text("Starbux"))
+///     .search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new("overturemaps.org").text("Starbux"))
 ///     .await?;
 /// # Ok(())
 /// # }

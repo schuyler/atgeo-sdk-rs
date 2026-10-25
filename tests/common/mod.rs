@@ -12,7 +12,9 @@ pub mod fake;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use atgeo::{Error, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, Tileset};
+use atgeo::{
+    Attribution, CollectionKey, Error, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, Tileset,
+};
 
 pub use fake::*;
 pub use serde_json::{Value, json};
@@ -155,6 +157,59 @@ pub fn code_of(e: &Error) -> &str {
 
 /// `{ bbox: [-122.42, 37.77, -122.41, 37.78] }`, the region most reference tests use.
 pub const REGION: Region = Region::bbox(-122.42, 37.77, -122.41, 37.78);
+
+/// An attribution entry as the wire spells it: a field that is `None` is a missing key, as the reference's
+/// `toStrictEqual` sees it, so a test compares a list with `json!([...])`.
+pub fn attribution_json(list: &[Attribution]) -> Value {
+    Value::Array(
+        list.iter()
+            .map(|a| {
+                let mut o = serde_json::Map::new();
+                o.insert("dataset".into(), json!(a.dataset));
+                o.insert("collection".into(), json!(a.collection));
+                for (k, v) in [("release", &a.release), ("source", &a.source), ("attribution", &a.attribution)] {
+                    if let Some(v) = v {
+                        o.insert(k.into(), json!(v));
+                    }
+                }
+                if let Some(l) = &a.licenses {
+                    o.insert("licenses".into(), json!(l));
+                }
+                Value::Object(o)
+            })
+            .collect(),
+    )
+}
+
+/// A hit's collection as `{ dataset, collection }` or `null`.
+pub fn collection_json(c: &Option<CollectionKey>) -> Value {
+    match c {
+        Some(k) => json!({ "dataset": k.dataset, "collection": k.collection }),
+        None => Value::Null,
+    }
+}
+
+/// `[{ dataset: "overturemaps.org", collection: "place" }]`, what the default tileset of the fake serves.
+pub fn overture_attribution() -> Value {
+    json!([{ "dataset": "overturemaps.org", "collection": "place" }])
+}
+
+/// A fixture's region: `{ lat, lon, radius }` or `{ bbox: [west, south, east, north] }`.
+pub fn region_from_json(v: &Value) -> Region {
+    match v.get("bbox") {
+        Some(b) => {
+            let b: Vec<f64> = b.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+            Region::bbox(b[0], b[1], b[2], b[3])
+        }
+        None => Region::circle(v["lat"].as_f64().unwrap(), v["lon"].as_f64().unwrap(), v["radius"].as_f64().unwrap()),
+    }
+}
+
+/// The dataset and collection the reference's tests spread into every call (`OVERTURE`): searches have no
+/// defaults (contract §4.1).
+pub fn overture_options() -> SearchOptions {
+    SearchOptions::new("overturemaps.org").collection("place")
+}
 
 pub fn url(n: &str) -> String {
     format!("https://tiles.example/{n}.json")

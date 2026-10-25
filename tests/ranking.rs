@@ -4,18 +4,8 @@
 #[macro_use]
 mod common;
 
-use atgeo::{Region, SearchOptions, SortMode};
+use atgeo::{SearchOptions, SortMode};
 use common::*;
-
-fn region_of(v: &Value) -> Region {
-    match v.get("bbox") {
-        Some(b) => {
-            let b: Vec<f64> = b.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
-            Region::bbox(b[0], b[1], b[2], b[3])
-        }
-        None => Region::circle(v["lat"].as_f64().unwrap(), v["lon"].as_f64().unwrap(), v["radius"].as_f64().unwrap()),
-    }
-}
 
 fn sort_of(v: Option<&Value>) -> SortMode {
     match v.and_then(Value::as_str) {
@@ -41,11 +31,14 @@ fn failures(kind: Kind) -> Vec<String> {
             .collect();
         let fake =
             FakeServer::with_tilesets(vec![overture(vec![tile("https://places.atgeo.org/tiles/t0.json", records)])]);
-        let mut options = SearchOptions::new().sort(sort_of(s.get("sort")));
+        // The scenario names the dataset and collection it is a search of (contract §8); there are no defaults.
+        let mut options = SearchOptions::new(s["dataset"].as_str().unwrap())
+            .collection(s["collection"].as_str().unwrap())
+            .sort(sort_of(s.get("sort")));
         if let Some(text) = s.get("text").and_then(Value::as_str) {
             options = options.text(text);
         }
-        let result = match kind.client(&fake).search(region_of(&s["region"]), options) {
+        let result = match kind.client(&fake).search(region_from_json(&s["region"]), options) {
             Ok(r) => r,
             Err(e) => {
                 failures.push(format!("{name}: {e}"));
