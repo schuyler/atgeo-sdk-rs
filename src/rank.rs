@@ -87,6 +87,7 @@ pub(crate) fn rank<'a>(
             Some(Ranked {
                 hit: SearchHit {
                     origin: record_key(record).map(str::to_owned),
+                    collection: None,
                     place: record.value.clone(),
                     importance: record.importance,
                     distance,

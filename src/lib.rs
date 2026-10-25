@@ -26,9 +26,9 @@ pub use error::{ArgumentError, AtgeoError, DecodingError, Error};
 pub use transport::ReqwestTransport;
 pub use transport::{BoxError, HttpResponse, HttpTransport};
 pub use types::{
-    CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, Place, PlaceBox, PlaceLocation,
-    PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset, ServiceDescription,
-    SortMode, TileCounts, TileFailure, TileFailureKind, Tileset,
+    Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionKey, CollectionRef, Extent, Place,
+    PlaceBox, PlaceLocation, PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset,
+    ServiceDescription, SortMode, TileCounts, TileFailure, TileFailureKind, Tileset, TilesetOverview,
 };
 
 /// The server a client talks to unless told otherwise.

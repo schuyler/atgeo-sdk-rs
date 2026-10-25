@@ -145,7 +145,9 @@ fn fixed(units: i64) -> String {
 /// The snapped, serialized getTiles bbox strings, one per antimeridian half, in call order.
 pub(crate) fn query_bboxes(region: &Region) -> Vec<String> {
     let (min_lon, min_lat, max_lon, max_lat) = match *region {
-        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => (min_lon, min_lat, max_lon, max_lat),
+        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => {
+            (min_lon, min_lat, max_lon, max_lat)
+        }
         Region::Circle { lat, lon, radius } => circle_box(lat, lon, radius),
     };
     let (lat0, lat1) = snap_span(min_lat, max_lat, 90);

@@ -23,8 +23,6 @@ use crate::xrpc;
 
 pub(crate) const DEFAULT_SERVER: &str = "https://places.atgeo.org";
 pub(crate) const DEFAULT_CACHE_BUDGET_BYTES: u64 = 50 * 1024 * 1024;
-const DEFAULT_DATASET: &str = "overturemaps.org";
-const DEFAULT_COLLECTION: &str = "place";
 pub(crate) const MAX_TILES_IN_FLIGHT: usize = 8;
 
 pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
@@ -164,12 +162,8 @@ impl Engine {
         }
         self.check_server()?;
 
-        let dataset = options.dataset.as_deref().unwrap_or(DEFAULT_DATASET);
-        let collection = match (&options.collection, &options.dataset) {
-            (Some(c), _) => Some(c.as_str()),
-            (None, None) => Some(DEFAULT_COLLECTION),
-            (None, Some(_)) => None,
-        };
+        let dataset = options.dataset.as_str();
+        let collection = options.collection.as_deref();
         let now = self.now();
         let lists = query_bboxes(&region)
             .into_iter()
@@ -225,7 +219,7 @@ impl Engine {
                 return Ok(records.clone());
             }
         }
-        wire::tile_records(&tile.body).map(Arc::from)
+        wire::tile_payload(&tile.body).map(|p| Arc::from(p.records))
     }
 
     /// Called when a worker reaches the URL, as the reference consults the cache, so that recency is
@@ -256,8 +250,10 @@ impl Engine {
             let error = Error::Atgeo(wire::error_from(response.status, &response.body));
             return Err(fail(TileFailureKind::Status, Some(response.status), error));
         }
-        let records: Arc<[TileRecord]> =
-            wire::tile_records(&response.body).map_err(|e| fail(TileFailureKind::Decode, None, e.into()))?.into();
+        let records: Arc<[TileRecord]> = wire::tile_payload(&response.body)
+            .map_err(|e| fail(TileFailureKind::Decode, None, e.into()))?
+            .records
+            .into();
         let keys = records.iter().filter_map(|r| record_key(r).map(str::to_owned)).collect();
         let generation = lock(&self.tiles).insert(url, response.body.into(), keys);
         Ok((generation, records))
@@ -313,7 +309,14 @@ impl Engine {
 
         *lock(&self.parsed) = used.into_iter().collect();
 
-        SearchResult { places, complete: failed == 0, overview, tiles: TileCounts { fetched, failed }, tile_failures }
+        SearchResult {
+            places,
+            complete: failed == 0,
+            overview,
+            tiles: TileCounts { fetched, failed },
+            tile_failures,
+            attribution: Vec::new(),
+        }
     }
 
     // --- getPlace and the describe calls --------------------------------------------------------
@@ -329,6 +332,7 @@ impl Engine {
                         origin: origin.to_owned(),
                         place: r.value.clone(),
                         importance: r.importance,
+                        attribution: Vec::new(),
                     }));
                 }
             }
@@ -342,8 +346,13 @@ impl Engine {
         response: Result<HttpResponse, BoxError>,
     ) -> Result<PlaceRecord, Error> {
         let body = Self::checked(response.map_err(Error::Transport)?)?;
-        let (record, importance) = wire::place_view(&body)?;
-        Ok(PlaceRecord { origin: origin.to_owned(), place: Arc::new(record), importance })
+        let view = wire::place_view(&body)?;
+        Ok(PlaceRecord {
+            origin: origin.to_owned(),
+            place: Arc::new(view.value),
+            importance: view.importance,
+            attribution: view.attribution,
+        })
     }
 
     pub(crate) fn service_step(&self) -> Result<Step<ServiceDescription>, Error> {

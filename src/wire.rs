@@ -8,8 +8,8 @@ use serde_json::{Map, Value};
 use crate::cache::TileRecord;
 use crate::error::{AtgeoError, DecodingError};
 use crate::types::{
-    CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, ServedTileset, ServiceDescription,
-    Tileset,
+    Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionRef, Extent, ServedTileset,
+    ServiceDescription, Tileset,
 };
 
 /// Decodes a body as `JSON.parse(await response.text())` would: invalid UTF-8 becomes U+FFFD and a leading
@@ -112,15 +112,24 @@ pub(crate) fn tile_list(body: &[u8]) -> Result<TileList, DecodingError> {
     })
 }
 
-/// A tile's usable records; a `DecodingError` for a body that is not a JSON object with a `records` array.
-pub(crate) fn tile_records(body: &[u8]) -> Result<Vec<TileRecord>, DecodingError> {
+/// What a tile payload holds that the client keeps (contract §1): its usable records, and its `attribution`
+/// when that is an array (`None` when the payload has none, or it is not a list).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TilePayload {
+    pub(crate) records: Vec<TileRecord>,
+    pub(crate) attribution: Option<Vec<Attribution>>,
+}
+
+/// A tile's usable records and attribution; a `DecodingError` for a body that is not a JSON object with a
+/// `records` array.
+pub(crate) fn tile_payload(body: &[u8]) -> Result<TilePayload, DecodingError> {
     let Value::Object(mut payload) = parse_body(body).map_err(DecodingError::json)? else {
         return Err(DecodingError::shape("tile is not an object"));
     };
     let Some(Value::Array(records)) = payload.remove("records") else {
         return Err(DecodingError::shape("tile has no records array"));
     };
-    Ok(records
+    let records = records
         .into_iter()
         .filter_map(|r| {
             let Value::Object(mut r) = r else { return None };
@@ -131,18 +140,29 @@ pub(crate) fn tile_records(body: &[u8]) -> Result<Vec<TileRecord>, DecodingError
             };
             Some(TileRecord { value: Arc::new(value), uri, importance: importance_of(r.get("importance")) })
         })
-        .collect())
+        .collect();
+    // TODO(contract-43): read the payload's `attribution` (§1).
+    Ok(TilePayload { records, attribution: None })
 }
 
-/// A getPlace body: its `record` object and `importance`.
-pub(crate) fn place_view(body: &[u8]) -> Result<(Map<String, Value>, Option<i64>), DecodingError> {
+/// What a getPlace body holds that the client keeps (contract §1).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PlaceView {
+    pub(crate) value: Map<String, Value>,
+    pub(crate) importance: Option<i64>,
+    pub(crate) attribution: Vec<Attribution>,
+}
+
+/// A getPlace body: its `value` object, `importance` and `attribution`.
+pub(crate) fn place_view(body: &[u8]) -> Result<PlaceView, DecodingError> {
     let value = parse_body(body).map_err(DecodingError::json)?;
     let Value::Object(mut view) = value else {
         return Err(DecodingError::shape("getPlace response is not an object"));
     };
     let importance = importance_of(view.get("importance"));
+    // TODO(contract-43): read `value` and `attribution`, not the earlier `record` shape (§1).
     match view.remove("record") {
-        Some(Value::Object(record)) => Ok((record, importance)),
+        Some(Value::Object(value)) => Ok(PlaceView { value, importance, attribution: Vec::new() }),
         _ => Err(DecodingError::shape("getPlace response has no record object")),
     }
 }
@@ -212,6 +232,7 @@ pub(crate) fn service_description(body: &[u8]) -> Result<ServiceDescription, Dec
     let o = describe_body(body, "describeService")?;
     Ok(ServiceDescription {
         did: string(&o, "did"),
+        max_tiles: None, // TODO(contract-43): importance_of(o.get("maxTiles")) (§1)
         tilesets: objects(&o, "tilesets", |t| ServedTileset {
             slug: string(t, "slug"),
             collections: objects(t, "collections", collection_ref).unwrap_or_default(),
@@ -233,6 +254,7 @@ pub(crate) fn tileset(body: &[u8]) -> Result<Tileset, DecodingError> {
         }),
         collections: objects(&o, "collections", collection_info).unwrap_or_default(),
         references: objects(&o, "references", attribution),
+        overview: None, // TODO(contract-43): the `overview` object and its `records` (§9)
     })
 }
 
@@ -331,20 +353,20 @@ mod tests {
             {"value":{"name":"b"},"uri":7,"importance":"3"},
             null, 3, "x", [], {"value":null}, {"value":"s"}, {"importance":1}
         ]}"#;
-        let records = tile_records(body).unwrap();
+        let records = tile_payload(body).unwrap().records;
         assert_eq!(records.len(), 2);
         assert_eq!((records[0].uri.as_deref(), records[0].importance), (Some("u"), Some(3)));
         assert_eq!((records[1].uri.as_deref(), records[1].importance), (None, None));
-        assert_eq!(tile_records(br#"{"records":[]}"#).unwrap().len(), 0);
+        assert_eq!(tile_payload(br#"{"records":[]}"#).unwrap().records.len(), 0);
         for body in [&b"{}"[..], b"[]", br#"{"records":{}}"#, b"null", b"x"] {
-            assert!(tile_records(body).is_err());
+            assert!(tile_payload(body).is_err());
         }
     }
 
     #[test]
     fn reads_a_place_view() {
-        let (record, importance) = place_view(br#"{"uri":"u","record":{"name":"x"},"importance":4}"#).unwrap();
-        assert_eq!((Value::Object(record), importance), (json!({"name": "x"}), Some(4)));
+        let view = place_view(br#"{"uri":"u","record":{"name":"x"},"importance":4}"#).unwrap();
+        assert_eq!((Value::Object(view.value), view.importance), (json!({"name": "x"}), Some(4)));
         for body in [&b"null"[..], b"{}", br#"{"record":"x"}"#, br#"{"record":null}"#, b"[]"] {
             assert!(place_view(body).is_err());
         }
@@ -382,5 +404,204 @@ mod tests {
         assert_eq!(t.references, Some(vec![]));
         let t = tileset(br#"{"extent":"x","collections":{},"references":"y"}"#).unwrap();
         assert_eq!((t.extent, t.collections, t.references), (None, vec![], None));
+    }
+
+    // ---- fixtures/lenient-readers.json (contract §13) ------------------------------------------------------
+
+    /// Puts `v` under `k` when it is there: an absent field is a missing key, so the comparison is strict.
+    fn put<V: Into<Value>>(o: &mut Map<String, Value>, k: &str, v: Option<V>) {
+        if let Some(v) = v {
+            o.insert(k.to_owned(), v.into());
+        }
+    }
+
+    fn attribution_to_json(list: &[Attribution]) -> Value {
+        list.iter()
+            .map(|a| {
+                let mut o = Map::new();
+                o.insert("dataset".into(), a.dataset.clone().into());
+                o.insert("collection".into(), a.collection.clone().into());
+                put(&mut o, "release", a.release.clone());
+                put(&mut o, "source", a.source.clone());
+                put(&mut o, "attribution", a.attribution.clone());
+                put(&mut o, "licenses", a.licenses.clone());
+                Value::Object(o)
+            })
+            .collect()
+    }
+
+    fn collection_attribution_to_json(a: &CollectionAttribution) -> Map<String, Value> {
+        let mut o = Map::new();
+        put(&mut o, "dataset", a.dataset.clone());
+        put(&mut o, "collection", a.collection.clone());
+        put(&mut o, "release", a.release.clone());
+        put(&mut o, "source", a.source.clone());
+        put(&mut o, "licenses", a.licenses.clone());
+        put(&mut o, "attribution", a.attribution.clone());
+        o
+    }
+
+    fn service_to_json(s: ServiceDescription) -> Value {
+        let mut o = Map::new();
+        put(&mut o, "did", s.did);
+        put(&mut o, "maxTiles", s.max_tiles);
+        let tilesets: Vec<Value> = s
+            .tilesets
+            .into_iter()
+            .map(|t| {
+                let mut o = Map::new();
+                put(&mut o, "slug", t.slug);
+                let collections: Vec<Value> = t
+                    .collections
+                    .into_iter()
+                    .map(|c| {
+                        let mut o = Map::new();
+                        put(&mut o, "dataset", c.dataset);
+                        put(&mut o, "collection", c.collection);
+                        Value::Object(o)
+                    })
+                    .collect();
+                o.insert("collections".into(), collections.into());
+                Value::Object(o)
+            })
+            .collect();
+        o.insert("tilesets".into(), tilesets.into());
+        Value::Object(o)
+    }
+
+    fn tileset_to_json(t: Tileset) -> Value {
+        let mut o = Map::new();
+        put(&mut o, "slug", t.slug);
+        put(&mut o, "publishedAt", t.published_at);
+        put(
+            &mut o,
+            "extent",
+            t.extent.map(|e| {
+                let mut x = Map::new();
+                put(&mut x, "north", e.north);
+                put(&mut x, "south", e.south);
+                put(&mut x, "east", e.east);
+                put(&mut x, "west", e.west);
+                Value::Object(x)
+            }),
+        );
+        let collections: Vec<Value> = t
+            .collections
+            .into_iter()
+            .map(|c| {
+                let mut x = collection_attribution_to_json(&CollectionAttribution {
+                    dataset: c.dataset,
+                    collection: c.collection,
+                    release: c.release,
+                    source: c.source,
+                    attribution: c.attribution,
+                    licenses: c.licenses,
+                });
+                put(&mut x, "recordCount", c.record_count);
+                put(&mut x, "locationFormats", c.location_formats);
+                put(&mut x, "containmentTypes", c.containment_types);
+                put(&mut x, "attributes", c.attributes);
+                put(
+                    &mut x,
+                    "categories",
+                    c.categories.map(|cs| {
+                        cs.into_iter()
+                            .map(|c| {
+                                let mut y = Map::new();
+                                put(&mut y, "value", c.value);
+                                put(&mut y, "count", c.count);
+                                Value::Object(y)
+                            })
+                            .collect::<Value>()
+                    }),
+                );
+                Value::Object(x)
+            })
+            .collect();
+        o.insert("collections".into(), collections.into());
+        put(
+            &mut o,
+            "references",
+            t.references
+                .map(|rs| rs.iter().map(|r| Value::Object(collection_attribution_to_json(r))).collect::<Value>()),
+        );
+        put(
+            &mut o,
+            "overview",
+            t.overview.map(|v| {
+                let mut x = Map::new();
+                put(&mut x, "records", v.records);
+                Value::Object(x)
+            }),
+        );
+        Value::Object(o)
+    }
+
+    /// What a reader keeps of `body`, in the fixture's JSON terms; `Err` for a decoding error.
+    fn read_with(reader: &str, body: &Value) -> Result<Value, DecodingError> {
+        let bytes = serde_json::to_vec(body).unwrap();
+        Ok(match reader {
+            "getTiles" => {
+                let l = tile_list(&bytes)?;
+                json!({ "tiles": l.tiles, "overview": l.overview })
+            }
+            "tilePayload" => {
+                let p = tile_payload(&bytes)?;
+                let records: Vec<Value> = p
+                    .records
+                    .iter()
+                    .map(|r| {
+                        let mut o = Map::new();
+                        o.insert("value".into(), Value::Object((*r.value).clone()));
+                        put(&mut o, "uri", r.uri.clone());
+                        put(&mut o, "importance", r.importance);
+                        Value::Object(o)
+                    })
+                    .collect();
+                let mut o = Map::new();
+                o.insert("records".into(), records.into());
+                put(&mut o, "attribution", p.attribution.map(|a| attribution_to_json(&a)));
+                Value::Object(o)
+            }
+            "getPlace" => {
+                let v = place_view(&bytes)?;
+                let mut o = Map::new();
+                o.insert("value".into(), Value::Object(v.value));
+                put(&mut o, "importance", v.importance);
+                o.insert("attribution".into(), attribution_to_json(&v.attribution));
+                Value::Object(o)
+            }
+            "describeService" => service_to_json(service_description(&bytes)?),
+            "describeTileset" => tileset_to_json(tileset(&bytes)?),
+            other => panic!("unknown reader {other}"),
+        })
+    }
+
+    #[test]
+    fn the_lenient_readers_agree_with_the_fixture() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!("../tests/fixtures/lenient-readers.json")).unwrap();
+        assert_eq!(cases.len(), 104);
+        let mut readers: Vec<&str> = cases.iter().map(|c| c["reader"].as_str().unwrap()).collect();
+        readers.sort_unstable();
+        readers.dedup();
+        assert_eq!(readers, ["describeService", "describeTileset", "getPlace", "getTiles", "tilePayload"]);
+
+        let mut failures = Vec::new();
+        for case in &cases {
+            let (reader, name) = (case["reader"].as_str().unwrap(), case["name"].as_str().unwrap());
+            let got = read_with(reader, &case["body"]);
+            if case.get("decodingError") == Some(&Value::Bool(true)) {
+                if let Ok(v) = got {
+                    failures.push(format!("{reader}: {name}: expected a decoding error, got {v}"));
+                }
+            } else {
+                match got {
+                    Ok(v) if v == case["result"] => {}
+                    Ok(v) => failures.push(format!("{reader}: {name}: got {v}, want {}", case["result"])),
+                    Err(e) => failures.push(format!("{reader}: {name}: unexpected decoding error {e}")),
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{} of {} cases failed:\n{}", failures.len(), cases.len(), failures.join("\n"));
     }
 }

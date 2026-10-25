@@ -16,7 +16,7 @@ async fn main() -> Result<(), atgeo::Error> {
     let result = atgeo
         .search_places(
             Region::circle(39.9526, -75.1652, 1000.0), // radius in meters
-            SearchOptions::new().text("Starbux"),
+            SearchOptions::new("overturemaps.org").text("Starbux"),
         )
         .await?;
 
@@ -36,7 +36,7 @@ use atgeo::{Region, SearchOptions, blocking::AtgeoClient};
 
 fn main() -> Result<(), atgeo::Error> {
     let atgeo = AtgeoClient::new();
-    let result = atgeo.search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new().text("Starbux"))?;
+    let result = atgeo.search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new("overturemaps.org").text("Starbux"))?;
     println!("{} places", result.places.len());
     Ok(())
 }
