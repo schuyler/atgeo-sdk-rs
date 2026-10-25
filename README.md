@@ -86,13 +86,12 @@ The async client's methods are `async`; the blocking client's are the same witho
 
 ### `search_places(region, options) -> SearchResult`
 
-`SearchOptions::new()` and its setters:
+`SearchOptions::new(dataset)` and its setters. The dataset is the one required piece, and there's no default: `SearchOptions::new("overturemaps.org")`. It's a string, so a missing or non-string dataset (and a collection without one) won't compile. An empty string is sent as given, and the server answers for itself.
 
 | Setter | Meaning |
 |---|---|
 | `.text(…)` | Optional search text. Matched fuzzily against each place's `name` and its `variants[].name`, after lowercasing and stripping accents and extra whitespace. Each name is scored against the whole query and against the query's first 12 words one at a time; words past the 12th count only in the whole-query comparison. |
-| `.dataset(…)` | Optional. The dataset to search, such as `openstreetmap.org`. Defaults to `overturemaps.org`. |
-| `.collection(…)` | Optional. Restricts the search to one collection of the dataset, such as `way`. See below for the defaults. |
+| `.collection(…)` | Optional. Restricts the search to one collection of the dataset, such as `way`. |
 | `.sort(…)` | `SortMode::Fused` (default), `SortMode::Distance`, or `SortMode::Similarity`. |
 
 Regions:
@@ -106,12 +105,10 @@ A `Region` isn't checked when you build it; `search_places` rejects an invalid o
 
 Datasets and collections work like this:
 
-- With neither, you search `overturemaps.org` / `place`.
-- With only `collection`, you search that collection of `overturemaps.org`.
-- With only `dataset`, you search the whole dataset, every collection together. `.dataset("openstreetmap.org")` returns nodes, ways and relations in one list. Add `.collection("way")` to get only ways.
-- With both, you search that collection.
+- With only a dataset, you search the whole dataset, every collection together. `SearchOptions::new("openstreetmap.org")` returns nodes, ways and relations in one list.
+- Add `.collection("way")` to get only ways.
 
-A collection-filtered search, including the default `overturemaps.org` / `place`, keeps only records whose `origin` starts with `urn:atgeo:{dataset}:{collection}:`. A record with no `origin` matches no collection filter, so such a search never returns one. A dataset-only search has no filter and returns those records too.
+A collection-filtered search keeps only records whose `origin` starts with `urn:atgeo:{dataset}:{collection}:`. A record with no `origin` matches no collection filter, so such a search never returns one. A dataset-only search has no filter and returns those records too.
 
 A bbox with `west > east` crosses the antimeridian. A place with a point location is kept if the point falls inside the region; a place with only a bounding box is kept if that box touches the region.
 
@@ -124,6 +121,7 @@ pub struct SearchResult {
     pub overview: bool,        // true if the server answered with its coarse overview; see below
     pub tiles: TileCounts,     // .fetched and .failed
     pub tile_failures: Vec<TileFailure>, // each failed tile, in URL order; empty when complete
+    pub attribution: Vec<Attribution>,   // who to credit for the data in the tiles the search used
 }
 
 pub struct TileFailure {
@@ -135,6 +133,7 @@ pub struct TileFailure {
 
 pub struct SearchHit {
     pub origin: Option<String>,  // the place's identity: place.origin, else the tile record's uri, else None
+    pub collection: Option<CollectionKey>, // the collection its origin names, if the tile's attribution has it
     pub place: Place,            // the record value, exactly as served
     pub importance: Option<i64>, // an integer relative to its tileset; None if it has none
     pub distance: f64,           // meters from the region's center to the nearest point of the place; 0 if the place contains the center
@@ -143,6 +142,27 @@ pub struct SearchHit {
 ```
 
 `Place` is `Arc<serde_json::Map<String, serde_json::Value>>`: the gazetteer's value untouched, every key as served, and nothing decoded into a Rust type. It's shared rather than copied, because the client keeps the latest search's tiles parsed and a hit points into them; `(*hit.place).clone()` gives you a copy of your own. `hit.name()` reads `name` when it's a string, and `hit.location()` returns the point and box the client read from `locations`, the same ones `distance` was measured to.
+
+#### Attribution
+
+`result.attribution` credits every collection whose data the search's tiles hold. If your app shows a hit, show this too: it includes the collections a tileset only references, since a hit's `within` relations can carry a containing division's name.
+
+```rust,ignore
+pub struct Attribution {
+    pub dataset: String,
+    pub collection: String,
+    pub release: Option<String>,
+    pub source: Option<String>,
+    pub attribution: Option<String>,
+    pub licenses: Option<Vec<String>>,
+}
+```
+
+It's built from every tile the search used, from the network or the cache, whether or not any of its places made it into the results. A tile that failed adds nothing. There is one entry per `(dataset, collection)`; when tiles disagree, the lowest tile URL wins, and fields aren't merged. The list is sorted by dataset and then collection, in UTF-16 code unit order like everything else the client sorts. It's a list even when it's empty (a tile with no attribution counts as an empty list), and an entry the server sends without a string `dataset` and `collection` is dropped.
+
+`hit.collection` is a `CollectionKey { dataset, collection }`: the first entry in the hit's own tile's attribution whose `urn:atgeo:{dataset}:{collection}:` starts the hit's `origin`. It's `None` when none does, including for a hit identified only by its `uri`. It never holds the `release` or `licenses`; look those up in `result.attribution`.
+
+You own what you're given. `Attribution` is plain owned data, so changing an entry or its `licenses` changes nothing the client holds.
 
 The result types are `#[non_exhaustive]`, so fields can be added without a major release. The price is that you can't build one with a struct literal.
 
@@ -168,15 +188,15 @@ A place can be stored in several tiles. The client keeps one hit per origin (or 
 
 ### `get_place(origin) -> PlaceRecord`
 
-Returns a `PlaceRecord` with `origin`, `place` and `importance`, as in a hit, and the same `name()` and `location()`. Pass the `origin` of a hit. If a cached tile holds the place, no request is made; otherwise the client asks the server (`org.atgeo.getPlace`) directly.
+Returns a `PlaceRecord` with `origin`, `place`, `importance` and `attribution`, as in a hit, and the same `name()` and `location()`. `attribution` is a list of `Attribution`, in the order the source served it, duplicates included and unsorted: from the cached tile that held the place (the lowest URL, if several did), or from the server's answer. It's empty if there is none. Pass the `origin` of a hit. If a cached tile holds the place, no request is made; otherwise the client asks the server (`org.atgeo.getPlace`) directly.
 
 ### `describe_service() -> ServiceDescription`
 
-Returns the server's `did` and its `tilesets`, each a `slug` and its `collections` (`dataset`, `collection`). Cached for an hour.
+Returns the server's `did`, its `max_tiles` (its tile budget, for information: tile zooms adapt, so you can't tell from it whether a box will fit) and its `tilesets`, each a `slug` and its `collections` (`dataset`, `collection`). Cached for an hour.
 
 ### `describe_tileset(slug) -> Tileset`
 
-Returns the tileset's descriptor: `slug`, `collections` (each with `dataset`, `collection` and optional `release`, `source`, `licenses`, `attribution`, `record_count`, `location_formats`, `containment_types`, `categories` and `attributes`), and optional `published_at`, `extent` and `references`. Not cached.
+Returns the tileset's descriptor: `slug`, `collections` (each with `dataset`, `collection` and optional `release`, `source`, `licenses`, `attribution`, `record_count`, `location_formats`, `containment_types`, `categories` and `attributes`), and optional `published_at`, `extent`, `references` and `overview` (`records`: how many records the tileset's overview band holds; absent if it has none). Not cached.
 
 Every field of the describe types is an `Option` except the lists the lexicon requires, which are `Vec`s. A field the server drops or retypes comes back `None` (or empty) rather than failing the call.
 
@@ -185,7 +205,7 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 `atgeo::Error` is one enum:
 
 - `Error::Atgeo(AtgeoError)`: the server answered with a non-2xx status. `AtgeoError` has a `code`, a `message` and the HTTP `status`, which tells a request the server refused (4xx) from one it failed to answer (5xx) without matching on codes. The code and message come from the server's JSON error body; if there isn't one, the code is `HttpError`. Apart from `HttpError`, every code comes from the server: for example `PlaceNotFound`, `TilesetNotFound`, `DatasetNotFound`, `CollectionNotFound`, `BboxTooLarge`, or `InvalidRequest`. The list is open, so report codes rather than matching on them.
-- `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `record`, a describe body that isn't an object).
+- `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `value` object in a `getPlace` answer, a describe body that isn't an object).
 - `Error::Transport(BoxError)`: no response arrived. It holds the transport's own error, so `downcast_ref::<reqwest::Error>()` reaches it.
 - `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `south > north`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
 
@@ -263,7 +283,7 @@ There is no persistence; a new client starts cold. Neither default transport has
 cargo test --all-features
 ```
 
-`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization and Jaro-Winkler fixtures and the contract's worked tables. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
+`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization, Jaro-Winkler and lenient-reader fixtures and the contract's worked tables. `tests/attribution.rs` runs the attribution scenarios, with a fresh client each, and again with the tiles arriving in reverse URL order. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
 
 `CONFORMANCE.md` lists where this port differs from the reference at the edges the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open, mostly in how malformed JSON and odd URLs are handled. None of it comes up with a garganorn server. [`rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js is the design this port was built to, and `DECISIONS.md` records where the build departed from it.
 
@@ -273,7 +293,7 @@ There's also an end-to-end run against a live server, through both clients, whic
 ATGEO_SERVER=http://localhost:8000 cargo run --all-features --example e2e
 ```
 
-It takes the same environment variables as the reference's `scripts/e2e.ts`: `ATGEO_SERVER` (default `http://localhost:8000`), `ATGEO_DATASET` (default `openstreetmap.org`), `ATGEO_COLLECTION` (default none), and `ATGEO_REGION` as `lat,lon,radius` in meters (default `43.0,-71.45,3000`, Manchester, NH). It prints a line per step and exits non-zero if either client fails. Against places.atgeo.org: `ATGEO_SERVER=https://places.atgeo.org ATGEO_DATASET=overturemaps.org ATGEO_REGION=39.9526,-75.1652,1000`.
+It needs the server work tracked in [garganorn#27](https://github.com/schuyler/garganorn/issues/27) (attribution in tiles and the new `getPlace` shape); until that's deployed, it can't pass against places.atgeo.org or an older garganorn. It takes the same environment variables as the reference's `scripts/e2e.ts`: `ATGEO_SERVER` (default `http://localhost:8000`), `ATGEO_DATASET` (default `openstreetmap.org`), `ATGEO_COLLECTION` (default none), and `ATGEO_REGION` as `lat,lon,radius` in meters (default `43.0,-71.45,3000`, Manchester, NH). It prints a line per step and exits non-zero if either client fails. Against places.atgeo.org: `ATGEO_SERVER=https://places.atgeo.org ATGEO_DATASET=overturemaps.org ATGEO_REGION=39.9526,-75.1652,1000`.
 
 ## Server requirements
 

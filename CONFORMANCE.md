@@ -2,7 +2,7 @@
 
 Where this port's behaviour differs from the TypeScript reference at the margins the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open (§5, §14), and the Unicode skew its §7 asks ports to record. None of these cases arises from a compliant garganorn server.
 
-The fixtures are vendored at the commit named in `tests/fixtures/SOURCE`. Unless a row says otherwise, the entries hold for both clients, and the JSON entries assume serde_json's default features. Cargo unifies features across a build, so another crate in your app can turn one on; the client is correct under any of them, but these margins move (see [JSON](#json)).
+The fixtures are vendored at the commit named in `tests/fixtures/SOURCE`, atgeo-sdk-js `2710a14ba7d9485ddb6c00975f396e95389ac419` (the port contract revision of schuyler/atgeo-sdk-js#43), with the lexicons at garganorn `2009984de02e9b3cbdf0f645213c99ec90ea3406`. All five fixtures pass: `normalize.json` and `jaro-winkler.json` and the ranking scenarios (which pass each scenario's `dataset` and `collection`) as before, `lenient-readers.json` (104 cases, run against the readers in `src/wire.rs`) and `attribution-scenarios.json` (12 scenarios, `tests/attribution.rs`, a fresh client for each). The contract asks each port for a test that the attribution follows tile URL order whatever order tiles arrive in; this port's is in the same file, and delays the lowest URL's response the longest. Unless a row says otherwise, the entries hold for both clients, and the JSON entries assume serde_json's default features. Cargo unifies features across a build, so another crate in your app can turn one on; the client is correct under any of them, but these margins move (see [JSON](#json)).
 
 ## JSON
 
@@ -58,6 +58,15 @@ A redirect to anything but http or https (`file:`, say) is a transport error in 
 | `Content-Encoding: x-gzip` | `UreqTransport` decodes it; `ReqwestTransport` returns the gzip bytes, so the tile fails to parse | decoded |
 | A body that decodes past 32 MiB | a transport error (`max_body_bytes`), so a failed tile of kind `Transport` (contract §4.4, §14) | read in full |
 | An empty body labelled gzip | empty, in both transports. If another crate in your app turns on ureq's `gzip` feature, ureq decodes it itself and fails it instead. | empty |
+
+## Dataset, attribution and getPlace
+
+| Behaviour | This port | Reference |
+|---|---|---|
+| A search with no dataset, or a dataset that is not a string, or a collection without a dataset (contract §3, §4.1) | does not compile: `SearchOptions::new` takes the dataset as a string, and there is no `Default`. So there is no run-time argument error for it, and no order to keep between it and the region checks. An empty string is sent as given. | a `TypeError` before any request, before the region is checked |
+| `SearchResult::attribution`, `PlaceRecord::attribution` and `SearchHit::collection` (§4.10, §8, §9) | owned values, cloned out of the cache for each answer, so changing one changes nothing cached. `collection` is an `Option<CollectionKey>`: always a field, `None` for the contract's null. A list is a `Vec`, never absent. | frozen or copied objects; `null` |
+| The attribution sort (§4.10) | by UTF-16 code units, through the same comparator as tile URLs, not `str`'s byte order, which differs above U+FFFF. No fixture has such a name; `tests/attribution.rs` does. | UTF-16 order |
+| A `getPlace` body that has `record` and no `value` (§1) | `Error::Decoding`, as the contract says. | `DecodingError` |
 
 ## Failed tiles
 
