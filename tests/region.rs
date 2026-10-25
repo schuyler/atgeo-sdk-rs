@@ -372,3 +372,12 @@ both! {
         }
     }
 }
+
+// R4 (garganorn#16): the bbox fields are named for the compass edges, in the wire's order.
+#[test]
+fn bbox_fields_are_west_south_east_north() {
+    let Region::Bbox { west, south, east, north } = Region::bbox(-122.42, 37.77, -122.41, 37.78) else {
+        panic!("a bbox")
+    };
+    assert_eq!((west, south, east, north), (-122.42, 37.77, -122.41, 37.78));
+}

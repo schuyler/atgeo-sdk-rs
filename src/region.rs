@@ -48,7 +48,7 @@ fn ok(n: f64, limit: f64) -> bool {
 
 pub(crate) fn validate(region: &Region) -> Result<(), ArgumentError> {
     match *region {
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat } => {
+        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => {
             if !(ok(min_lon, 180.0) && ok(max_lon, 180.0) && ok(min_lat, 90.0) && ok(max_lat, 90.0))
                 || min_lat > max_lat
             {
@@ -68,7 +68,7 @@ pub(crate) fn validate(region: &Region) -> Result<(), ArgumentError> {
 pub(crate) fn center(region: &Region) -> (f64, f64) {
     match *region {
         Region::Circle { lat, lon, .. } => (lat, lon),
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat } => {
+        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => {
             let mut lon =
                 if min_lon <= max_lon { (min_lon + max_lon) / 2.0 } else { (min_lon + max_lon + 360.0) / 2.0 };
             if lon > 180.0 {
@@ -145,7 +145,7 @@ fn fixed(units: i64) -> String {
 /// The snapped, serialized getTiles bbox strings, one per antimeridian half, in call order.
 pub(crate) fn query_bboxes(region: &Region) -> Vec<String> {
     let (min_lon, min_lat, max_lon, max_lat) = match *region {
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat } => (min_lon, min_lat, max_lon, max_lat),
+        Region::Bbox { west: min_lon, south: min_lat, east: max_lon, north: max_lat } => (min_lon, min_lat, max_lon, max_lat),
         Region::Circle { lat, lon, radius } => circle_box(lat, lon, radius),
     };
     let (lat0, lat1) = snap_span(min_lat, max_lat, 90);

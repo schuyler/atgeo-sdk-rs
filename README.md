@@ -99,7 +99,7 @@ Regions:
 
 ```rust,ignore
 Region::circle(39.9526, -75.1652, 1000.0)          // lat, lon, radius in meters
-Region::bbox(-75.18, 39.94, -75.14, 39.96)          // min_lon, min_lat, max_lon, max_lat, in degrees
+Region::bbox(-75.18, 39.94, -75.14, 39.96)          // west, south, east, north, in degrees
 ```
 
 A `Region` isn't checked when you build it; `search_places` rejects an invalid one before making any request.
@@ -113,7 +113,7 @@ Datasets and collections work like this:
 
 A collection-filtered search, including the default `overturemaps.org` / `place`, keeps only records whose `origin` starts with `urn:atgeo:{dataset}:{collection}:`. A record with no `origin` matches no collection filter, so such a search never returns one. A dataset-only search has no filter and returns those records too.
 
-A bbox with `min_lon > max_lon` crosses the antimeridian. A place with a point location is kept if the point falls inside the region; a place with only a bounding box is kept if that box touches the region.
+A bbox with `west > east` crosses the antimeridian. A place with a point location is kept if the point falls inside the region; a place with only a bounding box is kept if that box touches the region.
 
 The result:
 
@@ -187,7 +187,7 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 - `Error::Atgeo(AtgeoError)`: the server answered with a non-2xx status. `AtgeoError` has a `code`, a `message` and the HTTP `status`, which tells a request the server refused (4xx) from one it failed to answer (5xx) without matching on codes. The code and message come from the server's JSON error body; if there isn't one, the code is `HttpError`. Apart from `HttpError`, every code comes from the server: for example `PlaceNotFound`, `TilesetNotFound`, `DatasetNotFound`, `CollectionNotFound`, `BboxTooLarge`, or `InvalidRequest`. The list is open, so report codes rather than matching on them.
 - `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `record`, a describe body that isn't an object).
 - `Error::Transport(BoxError)`: no response arrived. It holds the transport's own error, so `downcast_ref::<reqwest::Error>()` reaches it.
-- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `min_lat > max_lat`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
+- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `south > north`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
 
 An error's `Display` says what went wrong at its own level and leaves the cause to `source()`, as the standard library's errors do: a transport failure displays as `transport error`, and a body that isn't JSON as `response is not JSON`, with the transport's or the parser's error as the source. To log the whole story, walk `source()`, or print it with anyhow's `{:#}`.
 

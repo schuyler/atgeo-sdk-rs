@@ -20,8 +20,8 @@ pub type Place = Arc<serde_json::Map<String, serde_json::Value>>;
 pub enum Region {
     /// A circle. Radius in metres.
     Circle { lat: f64, lon: f64, radius: f64 },
-    /// A bounding box, in degrees. `min_lon > max_lon` crosses the antimeridian.
-    Bbox { min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64 },
+    /// A bounding box, in degrees. `west > east` crosses the antimeridian.
+    Bbox { west: f64, south: f64, east: f64, north: f64 },
 }
 
 impl Region {
@@ -30,9 +30,10 @@ impl Region {
         Region::Circle { lat, lon, radius }
     }
 
-    /// A bounding box in degrees. `min_lon > max_lon` crosses the antimeridian.
-    pub const fn bbox(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
-        Region::Bbox { min_lon, min_lat, max_lon, max_lat }
+    /// A bounding box in degrees, in the order of the `getTiles` bbox string. `west > east` crosses the
+    /// antimeridian.
+    pub const fn bbox(west: f64, south: f64, east: f64, north: f64) -> Self {
+        Region::Bbox { west, south, east, north }
     }
 }
 
