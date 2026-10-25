@@ -640,6 +640,38 @@ mod datasets_and_collections {
             ]));
         }
     }
+
+    // Contract §4.7, §8: the match is on the start of `value.origin`. An origin that merely contains the prefix
+    // belongs to no collection of this dataset, so a filtered search drops it and a dataset-only search gives it
+    // no collection.
+    both! {
+        fn matches_the_start_of_the_origin_not_a_prefix_found_inside_it(kind: Kind) {
+            let embedded = "urn:atgeo:example.org:urn:atgeo:openstreetmap.org:way:5";
+            let fake = FakeServer::with_tilesets(vec![FakeTileset {
+                slug: Some("osm".into()),
+                collections: vec![json!({ "dataset": "openstreetmap.org", "collection": "way" })],
+                references: None,
+                overview: None,
+                tiles: vec![tile(
+                    &url("osm"),
+                    vec![
+                        rec(osm_place("way", "2", 37.772)),
+                        rec(place("e", "Embedded", vec![point(37.773, -122.415)], json!({ "origin": embedded }))),
+                    ],
+                )],
+            }]);
+            let client = kind.client(&fake);
+            let filtered = client.ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            assert_eq!(origins(&filtered), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
+            let whole = client.ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let got: std::collections::BTreeMap<_, _> =
+                whole.places.iter().map(|h| (h.origin.clone().unwrap(), h.collection.is_some())).collect();
+            assert_eq!(got, std::collections::BTreeMap::from([
+                ("urn:atgeo:openstreetmap.org:way:2".to_owned(), true),
+                (embedded.to_owned(), false),
+            ]));
+        }
+    }
 }
 
 // The clients' own URL checks (spec §4, URLs).

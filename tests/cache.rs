@@ -339,6 +339,34 @@ mod attribution_in_the_tile_cache {
             assert_eq!(attribution_json(&b.attribution), json!([place_, entry_b]));
         }
     }
+
+    // The cache holds a tile's body and parses it again when the parsed copy is gone, and the attribution is part
+    // of the body (contract §10): a search that finds its tiles only as bodies must read it again.
+    both! {
+        fn reads_the_attribution_again_from_a_tile_whose_parsed_copy_is_gone(kind: Kind) {
+            let (ua, ub) = (url("a"), url("b"));
+            let tiles_a = vec![tile(&ua, vec![rec(simple("pa", "A", vec![point(37.775, -122.415)]))])];
+            let tiles_b = vec![tile(&ub, vec![rec(simple("pb", "B", vec![point(10.55, -100.45)]))])];
+            let fake = FakeServer::builder()
+                .tilesets(vec![
+                    overture_with("overture-place", vec![json!({ "dataset": "ref-a.example", "collection": "c" })], tiles_a),
+                    overture_with("overture-place-b", vec![json!({ "dataset": "ref-b.example", "collection": "c" })], tiles_b),
+                ])
+                .tiles_for(move |bbox| TilesFor::Urls(vec![if bbox.starts_with("-122") { ua.clone() } else { ub.clone() }]))
+                .build();
+            let client = kind.client(&fake);
+            let first = client.ok(REGION, overture_options());
+            // The client keeps the parsed tiles of the latest search only, so this drops tile a's.
+            client.ok(REGION_B, overture_options());
+            fake.go_offline();
+            let again = client.ok(REGION, overture_options());
+            assert_eq!(again.attribution, first.attribution);
+            assert_eq!(attribution_json(&again.attribution).as_array().unwrap().len(), 2);
+            let collections = |r: &atgeo::SearchResult| r.places.iter().map(|h| h.collection.clone()).collect::<Vec<_>>();
+            assert_eq!(collections(&again), collections(&first));
+            assert!(collections(&again).iter().all(Option::is_some));
+        }
+    }
 }
 
 // describe("getPlace cache scan"), continued

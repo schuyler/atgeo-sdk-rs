@@ -365,11 +365,25 @@ mod tests {
 
     #[test]
     fn reads_a_place_view() {
-        let view = place_view(br#"{"uri":"u","record":{"name":"x"},"importance":4}"#).unwrap();
+        let body = br#"{"uri":"u","url":"x","value":{"name":"x"},"importance":4,
+            "attribution":[{"dataset":"d","collection":"c"},7,{"dataset":"d","collection":"c","release":"2"}]}"#;
+        let view = place_view(body).unwrap();
         assert_eq!((Value::Object(view.value), view.importance), (json!({"name": "x"}), Some(4)));
-        for body in [&b"null"[..], b"{}", br#"{"record":"x"}"#, br#"{"record":null}"#, b"[]"] {
+        // Served order, duplicates kept, the entry that names no collection dropped.
+        assert_eq!(
+            attribution_to_json(&view.attribution),
+            json!([
+                {"dataset": "d", "collection": "c"},
+                {"dataset": "d", "collection": "c", "release": "2"},
+            ])
+        );
+        // The earlier shape has no usable body (contract §1).
+        let earlier = br#"{"uri":"u","record":{"name":"x"}}"#;
+        for body in [&b"null"[..], b"{}", br#"{"value":"x"}"#, br#"{"value":null}"#, b"[]", earlier] {
             assert!(place_view(body).is_err());
         }
+        let bare = place_view(br#"{"value":{},"attribution":"x"}"#).unwrap();
+        assert_eq!((bare.importance, bare.attribution), (None, vec![]));
     }
 
     #[test]
