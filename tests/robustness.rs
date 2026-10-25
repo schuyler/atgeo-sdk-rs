@@ -38,9 +38,9 @@ mod tile_lists {
                 let fake = FakeServer::new();
                 fake.raw(LIST, 200, body);
                 let client = kind.client(&fake);
-                let e = client.search(REGION, SearchOptions::new()).unwrap_err();
+                let e = client.search(REGION, overture_options()).unwrap_err();
                 assert!(matches!(e, Error::Decoding(_)), "{body:?}: {e:?}");
-                let _ = client.search(REGION, SearchOptions::new());
+                let _ = client.search(REGION, overture_options());
                 assert_eq!(fake.count_of(LIST), 2, "{body:?}: a failed list must not be cached");
             }
         }
@@ -51,7 +51,7 @@ mod tile_lists {
             let fake = FakeServer::new();
             fake.raw(LIST, 200, json!({ "tiles": [1, null, {}, ["x"], TILE] }).to_string());
             fake.raw(TILE, 200, records_body(json!([{ "value": here("a") }])));
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
         }
@@ -62,7 +62,7 @@ mod tile_lists {
             for (overview, expected) in [(json!(1), true), (json!("yes"), true), (json!([]), true), (json!(0), false), (json!(""), false), (json!(null), false)] {
                 let fake = FakeServer::new();
                 fake.raw(LIST, 200, json!({ "tiles": [], "overview": overview }).to_string());
-                assert_eq!(kind.client(&fake).ok(REGION, SearchOptions::new()).overview, expected, "{overview}");
+                assert_eq!(kind.client(&fake).ok(REGION, overture_options()).overview, expected, "{overview}");
             }
         }
     }
@@ -73,7 +73,7 @@ mod tile_lists {
             let mut body = b"\xEF\xBB\xBF".to_vec();
             body.extend_from_slice(b"{\"tiles\":[],\"junk\":\"\xFF\"}");
             fake.raw(LIST, 200, body);
-            assert!(kind.client(&fake).search(REGION, SearchOptions::new()).is_ok());
+            assert!(kind.client(&fake).search(REGION, overture_options()).is_ok());
         }
     }
 }
@@ -86,7 +86,7 @@ mod tiles {
             // Nesting past serde_json's recursion limit is a parse error, not a stack overflow (contract §4.4).
             let deep = format!(r#"{{"records":[{{"value":{}1{}}}]}}"#, "[".repeat(100_000), "]".repeat(100_000));
             for body in ["not json", "null", "[]", "{}", r#"{"records":{}}"#, r#"{"records":"x"}"#, "1e400", deep.as_str()] {
-                let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
+                let result = kind.client(&tile_serving(body)).ok(REGION, overture_options());
                 assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (0, 1, false), "{body:?}");
                 let [failure] = &result.tile_failures[..] else { panic!("{:?}", result.tile_failures) };
                 assert_eq!((failure.url.as_str(), failure.kind, failure.status), (TILE, TileFailureKind::Decode, None));
@@ -108,7 +108,7 @@ mod tiles {
     both! {
         fn a_tile_with_no_records_is_used_not_failed(kind: Kind) {
             for body in [r#"{"records":[]}"#, r#"{"records":[null, 1, {"value": 2}]}"#] {
-                let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
+                let result = kind.client(&tile_serving(body)).ok(REGION, overture_options());
                 assert_eq!((result.tiles.fetched, result.tiles.failed, result.complete), (1, 0, true), "{body}");
                 assert!(result.tile_failures.is_empty(), "{body}");
             }
@@ -121,7 +121,7 @@ mod tiles {
                 null, 3, "x", [1], {}, { "value": null }, { "value": 7 }, { "value": [here("arr")] },
                 { "value": here("a") },
             ]));
-            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new());
+            let result = kind.client(&tile_serving(&body)).ok(REGION, overture_options());
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
         }
@@ -133,7 +133,7 @@ mod tiles {
                 { "value": "scalar", "uri": "at://x/1" },
                 { "value": { "name": "kept", "locations": [geo("37.775", "-122.415")] }, "uri": "at://x/1" },
             ]));
-            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some("at://x/1".to_owned())]);
         }
     }
@@ -148,7 +148,7 @@ mod tiles {
                 { "value": here("c"), "importance": 9223372036854775807i64 },
                 { "value": here("d"), "importance": 2.9 },
             ]));
-            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new().dataset("overturemaps.org"));
+            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new("overturemaps.org"));
             let by_name = |n: &str| result.places.iter().find(|h| h.name() == Some(n)).unwrap();
             assert_eq!((by_name("x").origin.clone(), by_name("x").importance), (None, None));
             assert_eq!(by_name("b").importance, None);
@@ -164,7 +164,7 @@ mod tiles {
                 "locations": [null, 5, "x", geo("37.775", "-122.415")],
                 "variants": [null, 3, "Alpha", { "name": 4 }, { "name": "Alpha" }],
             });
-            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, SearchOptions::new().text("Alpha"));
+            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, overture_options().text("Alpha"));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
             assert_eq!(result.places[0].score, Some(1.0));
         }
@@ -173,7 +173,7 @@ mod tiles {
     both! {
         fn reads_no_location_from_a_coordinate_in_an_array(kind: Kind) {
             let value = json!({ "origin": place_origin("a"), "name": "A", "locations": [{ "$type": "community.lexicon.location.geo", "latitude": ["37.775"], "longitude": "-122.415" }] });
-            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, SearchOptions::new());
+            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, overture_options());
             assert!(result.places.is_empty());
             assert_eq!(result.tiles.fetched, 1);
         }
@@ -182,7 +182,7 @@ mod tiles {
     both! {
         fn reads_coordinates_given_as_json_numbers(kind: Kind) {
             let value = json!({ "origin": place_origin("a"), "name": "A", "locations": [{ "$type": "community.lexicon.location.geo", "latitude": 37.775, "longitude": -122.415 }] });
-            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, SearchOptions::new());
+            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value }])))).ok(REGION, overture_options());
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
         }
     }
@@ -190,7 +190,7 @@ mod tiles {
     both! {
         fn keeps_a_tile_holding_a_lone_surrogate(kind: Kind) {
             let body = r#"{"records":[{"value":{"origin":"urn:atgeo:overturemaps.org:place:a","name":"A\ud800","locations":[{"$type":"community.lexicon.location.geo","latitude":"37.775","longitude":"-122.415"}]}}]}"#;
-            let result = kind.client(&tile_serving(body)).ok(REGION, SearchOptions::new());
+            let result = kind.client(&tile_serving(body)).ok(REGION, overture_options());
             assert_eq!(result.tiles.fetched, 1);
             assert_eq!(result.places[0].name(), Some("A\u{FFFD}"));
         }
@@ -200,8 +200,80 @@ mod tiles {
         fn surfaces_unknown_and_nested_fields_untouched(kind: Kind) {
             let mut value = here("a");
             value["future"] = json!({ "deep": [1, 2.5, null, true, "x", { "k": [] }], "big": 18446744073709551615u64 });
-            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value.clone() }])))).ok(REGION, SearchOptions::new());
+            let result = kind.client(&tile_serving(&records_body(json!([{ "value": value.clone() }])))).ok(REGION, overture_options());
             assert_eq!(*result.places[0].place, map(&value));
+        }
+    }
+}
+
+// describe("tile attribution")
+mod tile_attribution {
+    use super::*;
+
+    fn search(kind: Kind, tile_body: Value) -> atgeo::SearchResult {
+        kind.client(&tile_serving(&tile_body.to_string())).ok(REGION, overture_options())
+    }
+
+    fn good() -> Value {
+        json!({ "value": here("good"), "importance": 4 })
+    }
+
+    both! {
+        fn gives_a_search_whose_tiles_lack_attribution_an_empty_attribution_and_none_hit_collections(kind: Kind) {
+            let result = search(kind, json!({ "records": [good()] }));
+            assert_eq!(result.attribution, vec![]);
+            assert_eq!(result.places.len(), 1);
+            assert!(result.places.iter().all(|h| h.collection.is_none()));
+        }
+    }
+
+    both! {
+        fn does_not_fail_the_tile_for_an_attribution_that_is_not_an_array(kind: Kind) {
+            for attribution in [json!("x"), json!({}), Value::Null, json!(5)] {
+                let result = search(kind, json!({ "records": [good()], "attribution": attribution }));
+                assert_eq!((result.complete, result.tiles.fetched, result.tiles.failed), (true, 1, 0), "{attribution}");
+                assert!(result.tile_failures.is_empty(), "{attribution}");
+                assert_eq!(result.attribution, vec![], "{attribution}");
+                assert_eq!(origins(&result), [Some(place_origin("good"))], "{attribution}");
+            }
+        }
+    }
+
+    both! {
+        fn drops_the_entries_that_lack_a_string_dataset_and_collection_and_keeps_the_tile(kind: Kind) {
+            let result = search(kind, json!({
+                "records": [good()],
+                "attribution": [null, 5, { "dataset": "d" }, { "collection": "c" }, { "dataset": 1, "collection": "c" },
+                                { "dataset": "overturemaps.org", "collection": "place" }],
+            }));
+            assert!(result.complete);
+            assert_eq!(attribution_json(&result.attribution), overture_attribution());
+            assert_eq!(collection_json(&result.places[0].collection), json!({ "dataset": "overturemaps.org", "collection": "place" }));
+        }
+    }
+
+    both! {
+        fn reads_each_field_of_an_entry_on_its_own(kind: Kind) {
+            let result = search(kind, json!({
+                "records": [good()],
+                "attribution": [{
+                    "dataset": "d", "collection": "c", "release": 5, "source": "s", "attribution": ["x"],
+                    "licenses": ["l1", 2, null, "l2"], "unknown": true,
+                }, { "dataset": "e", "collection": "c", "licenses": "l" }],
+            }));
+            assert_eq!(attribution_json(&result.attribution), json!([
+                { "dataset": "d", "collection": "c", "source": "s", "licenses": ["l1", "l2"] },
+                { "dataset": "e", "collection": "c" },
+            ]));
+        }
+    }
+
+    both! {
+        fn does_not_let_a_tile_whose_body_fails_to_decode_contribute_its_attribution(kind: Kind) {
+            // A 200 whose body has no records array is a failed tile, though its attribution is readable.
+            let result = search(kind, json!({ "attribution": [{ "dataset": "d", "collection": "c" }] }));
+            assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 1));
+            assert_eq!(result.attribution, vec![]);
         }
     }
 }
@@ -234,17 +306,82 @@ mod errors_and_other_calls {
     }
 
     both! {
-        fn a_get_place_body_without_a_record_object_is_a_decoding_error(kind: Kind) {
-            for body in ["null", "{}", r#"{"uri":"u","record":"x"}"#, r#"{"record":null}"#, "[]", "nope"] {
+        fn a_get_place_body_without_a_value_object_is_a_decoding_error(kind: Kind) {
+            for body in [
+                "null", "{}", r#"{"uri":"u","value":"x"}"#, r#"{"value":null}"#, r#"{"value":[]}"#, "[]", "nope",
+                // The earlier shape, with `record` and no `value`, has no usable body (contract §1).
+                r#"{"uri":"x","record":{"name":"X"}}"#,
+            ] {
                 let fake = FakeServer::new();
                 fake.raw(PLACE, 200, body);
                 let e = kind.client(&fake).get_place("urn:x").unwrap_err();
                 assert!(matches!(e, Error::Decoding(_)), "{body}: {e:?}");
             }
             let fake = FakeServer::new();
-            fake.raw(PLACE, 200, r#"{"record":{"name":"n"},"importance":"9"}"#);
+            fake.raw(PLACE, 200, r#"{"uri":5,"value":{"name":"n"},"importance":"9"}"#);
             let found = kind.client(&fake).get_place("urn:x").unwrap();
             assert_eq!((found.name(), found.importance, found.origin.as_str()), (Some("n"), None, "urn:x"));
+            assert_eq!(found.attribution, vec![]);
+        }
+    }
+
+    both! {
+        fn a_get_place_body_in_the_new_shape_succeeds_and_returns_its_attribution_as_served(kind: Kind) {
+            let attribution = json!([
+                { "dataset": "d", "collection": "c", "licenses": ["l"] },
+                { "dataset": "d", "collection": "c", "release": "again" },
+                7, { "dataset": "only" },
+            ]);
+            let fake = FakeServer::new();
+            fake.raw(
+                PLACE,
+                200,
+                json!({ "uri": "urn:x", "url": "https://x.example/p", "importance": 3, "value": { "name": "X" }, "attribution": attribution })
+                    .to_string(),
+            );
+            let found = kind.client(&fake).get_place("urn:x").unwrap();
+            // Served order, duplicates kept; the entries that name no collection are dropped (contract §1).
+            assert_eq!(
+                attribution_json(&found.attribution),
+                json!([{ "dataset": "d", "collection": "c", "licenses": ["l"] }, { "dataset": "d", "collection": "c", "release": "again" }])
+            );
+            assert_eq!((found.name(), found.importance), (Some("X"), Some(3)));
+        }
+    }
+
+    both! {
+        fn a_get_place_attribution_that_is_not_an_array_is_empty(kind: Kind) {
+            for attribution in [json!({}), Value::Null, json!("x"), json!(5)] {
+                let fake = FakeServer::new();
+                fake.raw(PLACE, 200, json!({ "value": { "name": "X" }, "attribution": attribution }).to_string());
+                let found = kind.client(&fake).get_place("urn:x").unwrap();
+                assert_eq!(found.attribution, vec![], "{attribution}");
+            }
+        }
+    }
+
+    both! {
+        fn reads_max_tiles_and_an_overview_leniently(kind: Kind) {
+            let fake = FakeServer::new();
+            fake.raw(SERVICE, 200, r#"{"maxTiles":50.9,"tilesets":[]}"#);
+            fake.raw(TILESET, 200, r#"{"overview":{"records":"7","other":1}}"#);
+            let client = kind.client(&fake);
+            assert_eq!(client.describe_service().unwrap().max_tiles, Some(50));
+            assert_eq!(client.describe_tileset("s").unwrap().overview.unwrap().records, None);
+
+            for (body, max_tiles) in [(r#"{"maxTiles":"50"}"#, None), (r#"{"maxTiles":null}"#, None), (r#"{}"#, None)] {
+                let fake = FakeServer::new();
+                fake.raw(SERVICE, 200, body);
+                assert_eq!(kind.client(&fake).describe_service().unwrap().max_tiles, max_tiles, "{body}");
+            }
+            for body in [r#"{"overview":"x"}"#, r#"{"overview":[]}"#, r#"{"overview":null}"#, "{}"] {
+                let fake = FakeServer::new();
+                fake.raw(TILESET, 200, body);
+                assert_eq!(kind.client(&fake).describe_tileset("s").unwrap().overview, None, "{body}");
+            }
+            let fake = FakeServer::new();
+            fake.raw(TILESET, 200, r#"{"overview":{"records":1234}}"#);
+            assert_eq!(kind.client(&fake).describe_tileset("s").unwrap().overview.unwrap().records, Some(1234));
         }
     }
 

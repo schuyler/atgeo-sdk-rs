@@ -35,7 +35,7 @@ mod failed_tiles {
 
     both! {
         fn reports_a_complete_search(kind: Kind) {
-            let result = kind.client(&two_tiles(&[])).ok(REGION, SearchOptions::new());
+            let result = kind.client(&two_tiles(&[])).ok(REGION, overture_options());
             assert!(result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (2, 0));
             assert!(result.tile_failures.is_empty());
@@ -44,7 +44,7 @@ mod failed_tiles {
 
     both! {
         fn returns_surviving_results_marked_incomplete_when_a_tile_answers_non_200(kind: Kind) {
-            let result = kind.client(&two_tiles(&[&url("b")])).ok(REGION, SearchOptions::new());
+            let result = kind.client(&two_tiles(&[&url("b")])).ok(REGION, overture_options());
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 1));
             assert_eq!(origins(&result), [Some(place_origin("a"))]);
@@ -60,7 +60,7 @@ mod failed_tiles {
         fn returns_an_incomplete_result_when_a_tile_fetch_rejects(kind: Kind) {
             let fake = two_tiles(&[]);
             fake.network_error(&url("a"));
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 1));
             assert_eq!(origins(&result), [Some(place_origin("b"))]);
@@ -79,14 +79,14 @@ mod failed_tiles {
     both! {
         fn does_not_retry_a_failed_tile(kind: Kind) {
             let fake = two_tiles(&[&url("b")]);
-            kind.client(&fake).ok(REGION, SearchOptions::new());
+            kind.client(&fake).ok(REGION, overture_options());
             assert_eq!(fake.count_of(&url("b")), 1);
         }
     }
 
     both! {
         fn reports_every_tile_failed_without_throwing(kind: Kind) {
-            let result = kind.client(&two_tiles(&[&url("a"), &url("b")])).ok(REGION, SearchOptions::new());
+            let result = kind.client(&two_tiles(&[&url("a"), &url("b")])).ok(REGION, overture_options());
             assert!(result.places.is_empty());
             assert!(!result.complete);
             assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 2));
@@ -117,7 +117,7 @@ mod failed_tiles {
             fake.delay(&url("d"), Duration::from_millis(30));
             fake.delay(&url("a"), Duration::from_millis(20));
             fake.delay(&url("e"), Duration::from_millis(10));
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new());
+            let result = kind.client(&fake).ok(REGION, overture_options());
             assert_eq!(
                 failures(&result),
                 [
@@ -136,8 +136,8 @@ mod failed_tiles {
         fn a_cached_tile_is_not_reported_and_a_failure_is_reported_again(kind: Kind) {
             let fake = two_tiles(&[&url("b")]);
             let client = kind.client(&fake);
-            let first = client.ok(REGION, SearchOptions::new());
-            let second = client.ok(REGION, SearchOptions::new());
+            let first = client.ok(REGION, overture_options());
+            let second = client.ok(REGION, overture_options());
             assert_eq!(fake.count_of(&url("a")), 1, "the good tile came from the cache");
             assert_eq!(first.tile_failures, second.tile_failures);
             assert_eq!(failures(&second), [(url("b"), TileFailureKind::Status, Some(500))]);
@@ -152,7 +152,7 @@ mod typed_server_errors {
     both! {
         fn surfaces_bbox_too_large_from_get_tiles(kind: Kind) {
             let fake = FakeServer::builder().tiles_for(|_| TilesFor::Error("BboxTooLarge", "bbox too large")).build();
-            match kind.client(&fake).search(REGION, SearchOptions::new()).unwrap_err() {
+            match kind.client(&fake).search(REGION, overture_options()).unwrap_err() {
                 Error::Atgeo(e) => {
                     assert_eq!((e.code.as_str(), e.status), ("BboxTooLarge", 400));
                     assert_eq!(e.message, "bbox too large");
@@ -181,14 +181,14 @@ mod typed_server_errors {
 
     both! {
         fn surfaces_collection_not_found_from_get_tiles(kind: Kind) {
-            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new().collection("nope")).unwrap_err();
+            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new("overturemaps.org").collection("nope")).unwrap_err();
             assert_eq!(code_of(&e), "CollectionNotFound");
         }
     }
 
     both! {
         fn surfaces_dataset_not_found_from_get_tiles(kind: Kind) {
-            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new().dataset("example.org")).unwrap_err();
+            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new("example.org")).unwrap_err();
             assert_eq!(code_of(&e), "DatasetNotFound");
         }
     }
@@ -203,7 +203,7 @@ mod typed_server_errors {
                         if bbox.starts_with(prefix) { TilesFor::Error("BboxTooLarge", "too large") } else { TilesFor::Urls(vec![a.clone()]) }
                     })
                     .build();
-                let e = kind.client(&fake).search(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new()).unwrap_err();
+                let e = kind.client(&fake).search(Region::bbox(170.0, 10.0, -170.0, 20.0), overture_options()).unwrap_err();
                 assert_eq!(code_of(&e), "BboxTooLarge", "{prefix}");
             }
         }
@@ -212,7 +212,7 @@ mod typed_server_errors {
     both! {
         fn does_not_subdivide_after_bbox_too_large(kind: Kind) {
             let fake = FakeServer::builder().tiles_for(|_| TilesFor::Error("BboxTooLarge", "too large")).build();
-            let _ = kind.client(&fake).search(REGION, SearchOptions::new());
+            let _ = kind.client(&fake).search(REGION, overture_options());
             assert_eq!(fake.request_count(), 1);
         }
     }
@@ -221,7 +221,7 @@ mod typed_server_errors {
         fn surfaces_a_network_failure_as_a_transport_error(kind: Kind) {
             let fake = FakeServer::new();
             fake.go_offline();
-            let e = kind.client(&fake).search(REGION, SearchOptions::new()).unwrap_err();
+            let e = kind.client(&fake).search(REGION, overture_options()).unwrap_err();
             let Error::Transport(inner) = e else { panic!("{e:?}") };
             assert_eq!(inner.downcast_ref::<std::io::Error>().unwrap().to_string(), "network disabled");
         }
@@ -235,7 +235,7 @@ mod xrpc_urls {
     both! {
         fn defaults_to_places_atgeo_org(kind: Kind) {
             let fake = two_tiles(&[]);
-            kind.client(&fake).ok(REGION, SearchOptions::new());
+            kind.client(&fake).ok(REGION, overture_options());
             let first = &fake.requests()[0];
             assert_eq!(path_of(first), format!("{DEFAULT_SERVER}/xrpc/org.atgeo.getTiles"));
             assert_eq!(param(first, "dataset").as_deref(), Some("overturemaps.org"));
@@ -252,7 +252,7 @@ mod xrpc_urls {
                 .tilesets(vec![overture(vec![tile(&format!("{base}/tiles/a.json"), vec![rec(simple("a", "A", vec![point(37.772, -122.412)]))])])])
                 .build();
             let client = kind.with_server(&fake, base);
-            client.ok(REGION, SearchOptions::new());
+            client.ok(REGION, overture_options());
             client.describe_service().unwrap();
             client.describe_tileset("overture-place").unwrap();
             let _ = client.get_place(&place_origin("zzz"));

@@ -3,13 +3,13 @@
 #[macro_use]
 mod common;
 
-use atgeo::{ArgumentError, Error, Region, SearchOptions, SortMode};
+use atgeo::{ArgumentError, Error, Region, SortMode};
 use common::*;
 
 /// The bbox of each getTiles request a search for `region` makes.
 fn emitted(kind: Kind, region: Region) -> Vec<String> {
     let fake = FakeServer::new();
-    kind.client(&fake).ok(region, SearchOptions::new());
+    kind.client(&fake).ok(region, overture_options());
     let bboxes: Vec<String> = fake.tile_list_requests().iter().map(|r| param(r, "bbox").unwrap_or_default()).collect();
     in_segment_order(kind, bboxes)
 }
@@ -278,7 +278,7 @@ mod antimeridian {
                 ])])
                 .tiles_for(move |bbox| TilesFor::Urls(vec![if bbox.starts_with("170") { west.into() } else { east.into() }]))
                 .build();
-            let result = kind.client(&fake).ok(Region::bbox(170.0, 10.0, -170.0, 20.0), SearchOptions::new());
+            let result = kind.client(&fake).ok(Region::bbox(170.0, 10.0, -170.0, 20.0), overture_options());
             assert_eq!(ids_sorted(&result), ["e", "w"]);
             assert!(result.complete);
         }
@@ -315,7 +315,7 @@ mod invalid_regions {
             ];
             for (name, region) in bad {
                 let fake = FakeServer::new();
-                let e = kind.client(&fake).search(region, SearchOptions::new()).unwrap_err();
+                let e = kind.client(&fake).search(region, overture_options()).unwrap_err();
                 assert!(matches!(e, Error::InvalidArgument(ArgumentError::InvalidRegion(_))), "{name}: {e:?}");
                 assert_eq!(fake.request_count(), 0, "{name}");
             }
@@ -324,13 +324,13 @@ mod invalid_regions {
 
     both! {
         fn accepts_min_lon_greater_than_max_lon(kind: Kind) {
-            assert!(kind.client(&FakeServer::new()).search(Region::bbox(170.0, 0.0, -170.0, 1.0), SearchOptions::new()).is_ok());
+            assert!(kind.client(&FakeServer::new()).search(Region::bbox(170.0, 0.0, -170.0, 1.0), overture_options()).is_ok());
         }
     }
 
     both! {
         fn rejects_similarity_sort_without_text_before_any_request(kind: Kind) {
-            for options in [SearchOptions::new().sort(SortMode::Similarity), SearchOptions::new().text(" \u{3000}").sort(SortMode::Similarity)] {
+            for options in [overture_options().sort(SortMode::Similarity), overture_options().text(" \u{3000}").sort(SortMode::Similarity)] {
                 let fake = FakeServer::new();
                 let e = kind.client(&fake).search(Region::bbox(0.0, 0.0, 1.0, 1.0), options).unwrap_err();
                 assert!(matches!(e, Error::InvalidArgument(ArgumentError::SimilarityRequiresText)), "{e:?}");
@@ -343,7 +343,7 @@ mod invalid_regions {
         fn reports_the_region_before_the_sort_when_both_are_wrong(kind: Kind) {
             let e = kind
                 .client(&FakeServer::new())
-                .search(Region::circle(0.0, 0.0, -1.0), SearchOptions::new().sort(SortMode::Similarity))
+                .search(Region::circle(0.0, 0.0, -1.0), overture_options().sort(SortMode::Similarity))
                 .unwrap_err();
             assert!(matches!(e, Error::InvalidArgument(ArgumentError::InvalidRegion("invalid circle"))), "{e:?}");
         }

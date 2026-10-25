@@ -87,6 +87,8 @@ pub struct FakeTileset {
     /// Collection descriptors: `{ dataset, collection, … }`.
     pub collections: Vec<Value>,
     pub references: Option<Vec<Value>>,
+    /// The overview band, `{ records }`, emitted in the descriptor when set.
+    pub overview: Option<i64>,
     pub tiles: Vec<FakeTile>,
 }
 
@@ -96,6 +98,7 @@ pub fn overture(tiles: Vec<FakeTile>) -> FakeTileset {
         slug: Some("overture-place".into()),
         collections: vec![json!({ "dataset": "overturemaps.org", "collection": "place" })],
         references: None,
+        overview: None,
         tiles,
     }
 }
@@ -414,16 +417,25 @@ impl FakeServer {
         Value::Object(keys.iter().filter_map(|k| c.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
     }
 
-    fn tile_body(tileset: &FakeTileset, records: &[Value]) -> Value {
+    /// The attribution every tile of the tileset carries, and getPlace answers with: its collections, then
+    /// its references.
+    fn attribution_list(tileset: &FakeTileset) -> Vec<Value> {
         let mut attribution: Vec<Value> = tileset.collections.iter().map(Self::attribution_of).collect();
         attribution.extend(tileset.references.clone().unwrap_or_default());
-        json!({ "publishedAt": PUBLISHED_AT, "attribution": attribution, "records": records })
+        attribution
+    }
+
+    fn tile_body(tileset: &FakeTileset, records: &[Value]) -> Value {
+        json!({ "publishedAt": PUBLISHED_AT, "attribution": Self::attribution_list(tileset), "records": records })
     }
 
     fn descriptor_of(t: &FakeTileset) -> Value {
         let mut d = json!({ "slug": t.slug, "collections": t.collections });
         if let Some(r) = &t.references {
             d["references"] = json!(r);
+        }
+        if let Some(records) = t.overview {
+            d["overview"] = json!({ "records": records });
         }
         d
     }
@@ -486,8 +498,10 @@ impl FakeServer {
             for tile in &t.tiles {
                 if let Some(found) = tile.records.iter().find(|r| r["value"]["origin"].as_str() == Some(origin)) {
                     let mut view = json!({
-                        "uri": format!("{}/{}/{}/{rest}", self.0.server, dataset.unwrap(), collection.unwrap()),
-                        "record": found["value"],
+                        "uri": origin,
+                        "url": format!("{}/{}/{}/{rest}", self.0.server, dataset.unwrap(), collection.unwrap()),
+                        "value": found["value"],
+                        "attribution": Self::attribution_list(t),
                     });
                     if let Some(i) = found.get("importance") {
                         view["importance"] = i.clone();
@@ -548,7 +562,7 @@ impl FakeServer {
                         json!({ "slug": t.slug, "collections": cs })
                     })
                     .collect();
-                json_response(200, &json!({ "did": self.did(), "tilesets": tilesets }))
+                json_response(200, &json!({ "did": self.did(), "maxTiles": 50, "tilesets": tilesets }))
             }
             _ => match self.0.tilesets.iter().find(|t| t.slug.as_deref() == Some(p["slug"].as_str())) {
                 Some(t) => json_response(200, &Self::descriptor_of(t)),

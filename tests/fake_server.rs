@@ -101,6 +101,37 @@ mod requests {
     }
 
     #[test]
+    fn answers_get_place_with_exactly_uri_url_importance_value_and_attribution() {
+        let origin = ok()["origin"].as_str().unwrap().to_owned();
+        let url = format!("https://places.atgeo.org/xrpc/org.atgeo.getPlace?uri={}", origin.replace(':', "%3A"));
+        let body = json_of(&get(&build(vec![record(ok(), Some(3), None)], Some("overture-place")).unwrap(), &url));
+        let mut keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["attribution", "importance", "uri", "url", "value"]);
+        assert_eq!(body["uri"], json!(origin));
+        assert_eq!(body["value"], ok());
+        assert_eq!(body["importance"], 3);
+        assert_eq!(body["attribution"], json!([{ "dataset": "overturemaps.org", "collection": "place" }]));
+
+        let bare = json_of(&get(&build(vec![rec(ok())], Some("overture-place")).unwrap(), &url));
+        let mut keys: Vec<&String> = bare.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["attribution", "uri", "url", "value"]);
+    }
+
+    #[test]
+    fn emits_a_tilesets_overview_in_its_descriptor() {
+        let mut t = overture(vec![]);
+        t.overview = Some(7);
+        let fake = FakeServer::with_tilesets(vec![t]);
+        let body = json_of(&get(&fake, "https://places.atgeo.org/xrpc/org.atgeo.describeTileset?slug=overture-place"));
+        assert_eq!(body["overview"], json!({ "records": 7 }));
+        let plain = FakeServer::new();
+        let body = json_of(&get(&plain, "https://places.atgeo.org/xrpc/org.atgeo.describeTileset?slug=overture-place"));
+        assert!(body.get("overview").is_none());
+    }
+
+    #[test]
     fn answers_describe_service_with_a_did_and_tilesets() {
         let body = json_of(&get(
             &build(vec![], Some("overture-place")).unwrap(),
@@ -110,6 +141,7 @@ mod requests {
             body,
             json!({
                 "did": "did:web:places.atgeo.org",
+                "maxTiles": 50,
                 "tilesets": [{ "slug": "overture-place", "collections": [{ "dataset": "overturemaps.org", "collection": "place" }] }],
             })
         );
