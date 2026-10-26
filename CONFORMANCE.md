@@ -2,7 +2,7 @@
 
 Where this port's behaviour differs from the TypeScript reference at the margins the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open (§5, §14), and the Unicode skew its §7 asks ports to record. None of these cases arises from a compliant garganorn server.
 
-The fixtures are vendored at the commit named in `tests/fixtures/SOURCE`, atgeo-sdk-js `2710a14ba7d9485ddb6c00975f396e95389ac419` (the port contract revision of schuyler/atgeo-sdk-js#43), with the lexicons at garganorn `2009984de02e9b3cbdf0f645213c99ec90ea3406`. All five fixtures pass: `normalize.json` and `jaro-winkler.json` and the ranking scenarios (which pass each scenario's `dataset` and `collection`) as before, `lenient-readers.json` (104 cases, run against the readers in `src/wire.rs`) and `attribution-scenarios.json` (12 scenarios, `tests/attribution.rs`, a fresh client for each). The contract asks each port for a test that the attribution follows tile URL order whatever order tiles arrive in; this port's is in the same file, and delays the lowest URL's response the longest. Unless a row says otherwise, the entries hold for both clients, and the JSON entries assume serde_json's default features. Cargo unifies features across a build, so another crate in your app can turn one on; the client is correct under any of them, but these margins move (see [JSON](#json)).
+The fixtures are vendored at the commit named in `tests/fixtures/SOURCE`, atgeo-sdk-js `754aa0917d2839b489f0be3be60ac3b7530a52c7` (the port contract revision of schuyler/atgeo-sdk-js#49: match tiers, the overview drop, required `name` and `location`), with the lexicons at garganorn `2009984de02e9b3cbdf0f645213c99ec90ea3406`. All six fixtures pass: `normalize.json` (41 cases) and `jaro-winkler.json` (33), the ranking scenarios (19, `tests/ranking.rs`, which pass each scenario's `dataset` and `collection`, and have the fake server answer `getTiles` with an overview when the scenario says `"overview": true`), `match-tiers.json` (36 cases, `src/text.rs`, run on the normalized query and the case's place through the same tier function ranking uses), `lenient-readers.json` (104 cases, run against the readers in `src/wire.rs`) and `attribution-scenarios.json` (12 scenarios, `tests/attribution.rs`, a fresh client for each). The contract asks each port for a test that the attribution follows tile URL order whatever order tiles arrive in; this port's is in the same file, and delays the lowest URL's response the longest. Unless a row says otherwise, the entries hold for both clients, and the JSON entries assume serde_json's default features. Cargo unifies features across a build, so another crate in your app can turn one on; the client is correct under any of them, but these margins move (see [JSON](#json)).
 
 ## JSON
 
@@ -85,6 +85,14 @@ This port reports each failed tile in `SearchResult::tile_failures`, in URL orde
 | The order tile requests start in, and so the order tiles are touched in the cache | async client: the reference's, index order with every worker's first lookup before any store. Blocking client: whichever of its eight threads gets there first. So with a budget too small for a search's tiles, which tiles stay cached afterwards can differ from run to run; results do not. | index order |
 | Which error a search returns when both getTiles halves fail | async client: the first to arrive, and the other request is dropped (§14). Blocking client: the first in call order, after both finish, since a blocking request cannot be cancelled. | the first to arrive |
 | Cancellation | async client: drop the future. A call answered entirely from cache completes on its first poll. Blocking client: none beyond the transport's timeouts. | `AbortSignal` |
+
+## Match tier
+
+| Behaviour | This port | Reference |
+|---|---|---|
+| Prefix (contract §7) | `str::starts_with`, a UTF-8 byte prefix, which for valid strings is the same as a code point prefix and a UTF-16 code unit prefix (a `String` cannot hold a lone surrogate). The fixture's `क` against `कि` passes. | UTF-16 code units |
+| Punctuation (P*) | `unicode-properties` general category (Unicode 17.0), where the reference uses V8's `\p{P}`. No fixture case differs. | `\p{P}` |
+| `SearchHit::name()`, `location()`, `PlaceRecord::name()`, `location()` (§8, §9) | accessors that read the place on each call, not fields; `name()` is `None` unless `name` is a string, and `location()` is a `PlaceLocation` of `Option<PlacePoint>` and `Option<PlaceBox>` (`south`, `west`, `north`, `east`). The place is still surfaced as served. | `name` and `location` properties, frozen |
 
 ## Unicode skew
 

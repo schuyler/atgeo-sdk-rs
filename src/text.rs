@@ -86,10 +86,45 @@ fn jaro(a: &[u16], b: &[u16]) -> f64 {
     (m / a.len() as f64 + m / b.len() as f64 + (m - transpositions as f64 / 2.0) / m) / 3.0
 }
 
+/// The words of a normalized name or query word for tier matching (contract §7): apostrophes (U+0027, U+2019,
+/// U+02BC) vanish, and each run of punctuation (general category P*) separates words. Symbols do not.
+fn fold(s: &str) -> Vec<String> {
+    let spaced: String = s
+        .chars()
+        .filter(|&c| !matches!(c, '\'' | '\u{2019}' | '\u{02BC}'))
+        .map(|c| match c.general_category() {
+            GeneralCategory::ConnectorPunctuation
+            | GeneralCategory::DashPunctuation
+            | GeneralCategory::OpenPunctuation
+            | GeneralCategory::ClosePunctuation
+            | GeneralCategory::InitialPunctuation
+            | GeneralCategory::FinalPunctuation
+            | GeneralCategory::OtherPunctuation => ' ',
+            _ => c,
+        })
+        .collect();
+    spaced.split(' ').filter(|t| !t.is_empty()).map(str::to_owned).collect()
+}
+
+/// The normalized, non-empty `name` and `variants[].name` of a place: the names a query is scored and tiered against.
+fn names(value: &Map<String, Value>) -> impl Iterator<Item = String> + '_ {
+    let variants = match value.get("variants") {
+        Some(Value::Array(vs)) => vs.as_slice(),
+        _ => &[],
+    };
+    std::iter::once(value.get("name"))
+        .chain(variants.iter().map(|v| v.as_object().and_then(|o| o.get("name"))))
+        .filter_map(|n| n.and_then(Value::as_str))
+        .map(normalize)
+        .filter(|n| !n.is_empty())
+}
+
 /// A normalized, non-empty query, split once for every record it scores.
 pub(crate) struct Query {
     whole: Vec<u16>,
     tokens: Vec<Vec<u16>>,
+    /// The first twelve words, each folded (contract §7); a word that folds to nothing still used its slot.
+    folded: Vec<String>,
 }
 
 impl Query {
@@ -101,6 +136,7 @@ impl Query {
         Some(Query {
             whole: normalized.encode_utf16().collect(),
             tokens: normalized.split(' ').take(MAX_QUERY_TOKENS).map(|t| t.encode_utf16().collect()).collect(),
+            folded: normalized.split(' ').take(MAX_QUERY_TOKENS).flat_map(fold).collect(),
         })
     }
 
@@ -117,16 +153,21 @@ impl Query {
 
     /// The best score of the place's `name` and its `variants[].name`, at least 0.
     pub(crate) fn score(&self, value: &Map<String, Value>) -> f64 {
-        let variants = match value.get("variants") {
-            Some(Value::Array(vs)) => vs.as_slice(),
-            _ => &[],
-        };
-        let names = std::iter::once(value.get("name"))
-            .chain(variants.iter().map(|v| v.as_object().and_then(|o| o.get("name"))))
-            .filter_map(|n| n.and_then(Value::as_str))
-            .map(normalize)
-            .filter(|n| !n.is_empty());
-        names.map(|n| self.score_name(&n)).fold(0.0, f64::max)
+        names(value).map(|n| self.score_name(&n)).fold(0.0, f64::max)
+    }
+
+    /// 1 if every query word begins a word of one single name, else 2 (contract §7); 1 for a query that folds
+    /// to no words. Call it for a record that scored at least 0.6. `str::starts_with` is a prefix in UTF-16
+    /// code units too: a UTF-8 byte prefix of a valid string is a code point prefix.
+    pub(crate) fn tier(&self, value: &Map<String, Value>) -> u8 {
+        if self.folded.is_empty() {
+            return 1;
+        }
+        let exact = names(value).any(|name| {
+            let words = fold(&name);
+            self.folded.iter().all(|q| words.iter().any(|w| w.starts_with(q.as_str())))
+        });
+        if exact { 1 } else { 2 }
     }
 }
 
@@ -218,6 +259,25 @@ mod tests {
         assert_eq!(q.score(v.as_object().unwrap()), 1.0);
         let none = json!({ "variants": "Munich" });
         assert_eq!(q.score(none.as_object().unwrap()), 0.0);
+    }
+
+    // matchTiers.test.ts
+    #[test]
+    fn match_tiers_fixture() {
+        let cases: Vec<Value> = serde_json::from_str(include_str!("../tests/fixtures/match-tiers.json")).unwrap();
+        assert_eq!(cases.len(), 36);
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|c| {
+                let (name, query) = (c["name"].as_str().unwrap(), c["query"].as_str().unwrap());
+                // `place` is `{ name, variants? }`, with `variants` a list of `{ name }`: a place value as served.
+                let place = c["place"].as_object().unwrap();
+                let got = Query::new(&normalize(query)).unwrap().tier(place);
+                let want = c["tier"].as_u64().unwrap() as u8;
+                (got != want).then(|| format!("{name}: tier({query:?}) = {got}, expected {want}"))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

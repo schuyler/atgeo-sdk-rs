@@ -1,0 +1,310 @@
+[
+  {
+    "name": "apostrophe-dropped",
+    "query": "mcdonalds",
+    "place": {
+      "name": "McDonald's"
+    },
+    "tier": 1
+  },
+  {
+    "name": "apostrophe-in-query",
+    "query": "mcdonald's",
+    "place": {
+      "name": "McDonald's"
+    },
+    "tier": 1
+  },
+  {
+    "name": "apostrophe-curly-name",
+    "query": "mcdonalds",
+    "place": {
+      "name": "McDonald’s"
+    },
+    "tier": 1
+  },
+  {
+    "name": "apostrophe-curly-query",
+    "query": "mcdonald’s",
+    "place": {
+      "name": "McDonald's"
+    },
+    "tier": 1
+  },
+  {
+    "name": "apostrophe-modifier-letter",
+    "query": "mcdonalds",
+    "place": {
+      "name": "McDonaldʼs"
+    },
+    "tier": 1
+  },
+  {
+    "name": "apostrophe-prefix",
+    "query": "mcdon",
+    "place": {
+      "name": "McDonald's"
+    },
+    "tier": 1
+  },
+  {
+    "name": "period-splits",
+    "query": "st louis",
+    "place": {
+      "name": "St. Louis"
+    },
+    "tier": 1
+  },
+  {
+    "name": "period-in-query",
+    "query": "st. louis",
+    "place": {
+      "name": "St Louis"
+    },
+    "tier": 1
+  },
+  {
+    "name": "hyphen-splits",
+    "query": "saint germain",
+    "place": {
+      "name": "Saint-Germain"
+    },
+    "tier": 1
+  },
+  {
+    "name": "hyphen-in-query",
+    "query": "saint-germain",
+    "place": {
+      "name": "Saint Germain"
+    },
+    "tier": 1
+  },
+  {
+    "name": "ampersand-splits",
+    "query": "at&t",
+    "place": {
+      "name": "AT&T"
+    },
+    "tier": 1
+  },
+  {
+    "name": "ampersand-spaced-query",
+    "query": "at t",
+    "place": {
+      "name": "AT&T"
+    },
+    "tier": 1
+  },
+  {
+    "name": "prefix-of-token",
+    "query": "star",
+    "place": {
+      "name": "Starbucks"
+    },
+    "tier": 1
+  },
+  {
+    "name": "mid-word-is-fuzzy",
+    "query": "bucks",
+    "place": {
+      "name": "Starbucks"
+    },
+    "tier": 2
+  },
+  {
+    "name": "typo-is-fuzzy",
+    "query": "starbux",
+    "place": {
+      "name": "Starbucks"
+    },
+    "tier": 2
+  },
+  {
+    "name": "multi-token-one-name",
+    "query": "blue bottle",
+    "place": {
+      "name": "Blue Bottle Coffee"
+    },
+    "tier": 1
+  },
+  {
+    "name": "multi-token-any-order",
+    "query": "coffee blue",
+    "place": {
+      "name": "Blue Bottle Coffee"
+    },
+    "tier": 1
+  },
+  {
+    "name": "multi-token-split-name-and-variant",
+    "query": "blue coffee",
+    "place": {
+      "name": "Blue Bottle",
+      "variants": [
+        {
+          "name": "Coffee Roasters"
+        }
+      ]
+    },
+    "tier": 2
+  },
+  {
+    "name": "multi-token-all-in-variant",
+    "query": "bottle coffee",
+    "place": {
+      "name": "Joe's",
+      "variants": [
+        {
+          "name": "Blue Bottle Coffee"
+        }
+      ]
+    },
+    "tier": 1
+  },
+  {
+    "name": "multi-token-one-missing",
+    "query": "blue tea",
+    "place": {
+      "name": "Blue Bottle Coffee"
+    },
+    "tier": 2
+  },
+  {
+    "name": "variant-only-match",
+    "query": "munich",
+    "place": {
+      "name": "München",
+      "variants": [
+        {
+          "name": "Munich"
+        }
+      ]
+    },
+    "tier": 1
+  },
+  {
+    "name": "accent-folding",
+    "query": "munchen",
+    "place": {
+      "name": "München"
+    },
+    "tier": 1
+  },
+  {
+    "name": "cjk-prefix",
+    "query": "東京",
+    "place": {
+      "name": "東京駅"
+    },
+    "tier": 1
+  },
+  {
+    "name": "cjk-suffix-is-fuzzy",
+    "query": "駅",
+    "place": {
+      "name": "東京駅"
+    },
+    "tier": 2
+  },
+  {
+    "name": "all-punctuation-query",
+    "query": "&",
+    "place": {
+      "name": "Starbucks"
+    },
+    "tier": 1
+  },
+  {
+    "name": "all-punctuation-query-ellipsis",
+    "query": "...",
+    "place": {
+      "name": "Anything"
+    },
+    "tier": 1
+  },
+  {
+    "name": "thirteenth-token-ignored",
+    "query": "a b c d e f g h i j k l zzz",
+    "place": {
+      "name": "A B C D E F G H I J K L"
+    },
+    "tier": 1
+  },
+  {
+    "name": "twelfth-token-counts",
+    "query": "a b c d e f g h i j k zzz",
+    "place": {
+      "name": "A B C D E F G H I J K L"
+    },
+    "tier": 2
+  },
+  {
+    "name": "grapheme-split-by-code-unit-prefix",
+    "query": "क",
+    "place": {
+      "name": "कि"
+    },
+    "tier": 1
+  },
+  {
+    "name": "name-all-punctuation-has-no-tokens",
+    "query": "amp",
+    "place": {
+      "name": "&"
+    },
+    "tier": 2
+  },
+  {
+    "name": "name-all-punctuation-variant-matches",
+    "query": "amp",
+    "place": {
+      "name": "&",
+      "variants": [
+        {
+          "name": "Amp Bar"
+        }
+      ]
+    },
+    "tier": 1
+  },
+  {
+    "name": "name-with-edge-punctuation",
+    "query": "cafe",
+    "place": {
+      "name": "--- Cafe ---"
+    },
+    "tier": 1
+  },
+  {
+    "name": "name-all-apostrophes-has-no-tokens",
+    "query": "x",
+    "place": {
+      "name": "'"
+    },
+    "tier": 2
+  },
+  {
+    "name": "empty-name-matches-nothing",
+    "query": "x",
+    "place": {
+      "name": ""
+    },
+    "tier": 2
+  },
+  {
+    "name": "punctuation-word-uses-a-slot",
+    "query": "& a b c d e f g h i j k zzz",
+    "place": {
+      "name": "A B C D E F G H I J K"
+    },
+    "tier": 1
+  },
+  {
+    "name": "symbol-does-not-split",
+    "query": "a+b",
+    "place": {
+      "name": "A B"
+    },
+    "tier": 2
+  }
+]

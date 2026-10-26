@@ -19,7 +19,7 @@ fn sort_of(v: Option<&Value>) -> SortMode {
 /// Runs every scenario and returns one line per failed expectation.
 fn failures(kind: Kind) -> Vec<String> {
     let scenarios: Vec<Value> = serde_json::from_str(include_str!("fixtures/ranking-scenarios.json")).unwrap();
-    assert_eq!(scenarios.len(), 12);
+    assert_eq!(scenarios.len(), 19);
     let mut failures = Vec::new();
     for s in &scenarios {
         let name = s["name"].as_str().unwrap();
@@ -29,8 +29,13 @@ fn failures(kind: Kind) -> Vec<String> {
             .iter()
             .map(|r| record(r["value"].clone(), r["importance"].as_i64(), None))
             .collect();
-        let fake =
-            FakeServer::with_tilesets(vec![overture(vec![tile("https://places.atgeo.org/tiles/t0.json", records)])]);
+        const TILE: &str = "https://places.atgeo.org/tiles/t0.json";
+        let mut builder = FakeServer::builder().tilesets(vec![overture(vec![tile(TILE, records)])]);
+        // A scenario with "overview": true has the fake's getTiles answer it (contract §8).
+        if s.get("overview").and_then(Value::as_bool) == Some(true) {
+            builder = builder.tiles_for(|_| TilesFor::Answer { tiles: vec![TILE.to_owned()], overview: Some(true) });
+        }
+        let fake = builder.build();
         // The scenario names the dataset and collection it is a search of (contract §8); there are no defaults.
         let mut options = SearchOptions::new(s["dataset"].as_str().unwrap())
             .collection(s["collection"].as_str().unwrap())
