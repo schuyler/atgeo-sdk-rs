@@ -39,7 +39,13 @@ pub(crate) fn cmp_utf16(a: &str, b: &str) -> Ordering {
 
 struct Ranked {
     hit: SearchHit,
+    /// 1 or 2 with text, `None` without (contract §7).
+    tier: Option<u8>,
     specificity: f64,
+}
+
+fn by_tier(a: &Ranked, b: &Ranked) -> Ordering {
+    a.tier.cmp(&b.tier)
 }
 
 fn by_score(a: &Ranked, b: &Ranked) -> Ordering {
@@ -68,18 +74,23 @@ fn by_origin(a: &Ranked, b: &Ranked) -> Ordering {
 }
 
 /// Scores, filters on the text threshold, and sorts records that already passed the region filter.
-/// `query` is `None` without text.
+/// `query` is `None` without text. With text on an `overview` answer, tier-2 (fuzzy only) hits are dropped.
 pub(crate) fn rank<'a>(
     records: impl IntoIterator<Item = (&'a TileRecord, &'a [Attribution])>,
     center: (f64, f64),
     query: Option<&Query>,
     sort: SortMode,
+    overview: bool,
 ) -> Vec<SearchHit> {
     let mut ranked: Vec<Ranked> = records
         .into_iter()
         .filter_map(|(record, attribution)| {
             let score = query.map(|q| q.score(&record.value));
             if score.is_some_and(|s| s < JW_THRESHOLD) {
+                return None;
+            }
+            let tier = query.map(|q| q.tier(&record.value));
+            if overview && tier == Some(2) {
                 return None;
             }
             let locations = locate(&record.value);
@@ -94,6 +105,7 @@ pub(crate) fn rank<'a>(
                     distance,
                     score,
                 },
+                tier,
                 specificity: specificity(&locations),
             })
         })
@@ -102,17 +114,19 @@ pub(crate) fn rank<'a>(
     // sort_by is stable, so hits that tie on everything keep their concatenated order.
     match sort {
         SortMode::Distance => ranked.sort_by(|a, b| {
-            by_distance(a, b)
+            by_tier(a, b)
+                .then_with(|| by_distance(a, b))
                 .then_with(|| by_specificity(a, b))
                 .then_with(|| by_importance(a, b))
                 .then_with(|| by_score(a, b))
                 .then_with(|| by_origin(a, b))
         }),
-        SortMode::Similarity => {
-            ranked.sort_by(|a, b| by_score(a, b).then_with(|| by_distance(a, b)).then_with(|| by_origin(a, b)))
-        }
+        SortMode::Similarity => ranked.sort_by(|a, b| {
+            by_tier(a, b).then_with(|| by_score(a, b)).then_with(|| by_distance(a, b)).then_with(|| by_origin(a, b))
+        }),
         SortMode::Fused => ranked.sort_by(|a, b| {
-            by_score(a, b)
+            by_tier(a, b)
+                .then_with(|| by_score(a, b))
                 .then_with(|| by_importance(a, b))
                 .then_with(|| by_distance(a, b))
                 .then_with(|| by_origin(a, b))

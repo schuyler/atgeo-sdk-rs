@@ -27,7 +27,7 @@ async fn main() -> Result<(), atgeo::Error> {
 }
 ```
 
-Misspellings are fine; matching is fuzzy, and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial; `result.tile_failures` says which and why. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
+Misspellings are fine; matching is fuzzy (words that match exactly rank first), and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial; `result.tile_failures` says which and why. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
 
 The async example needs `tokio` (with its `macros` and `rt` features) in your own dependencies for `#[tokio::main]`; the crate itself doesn't depend on Tokio, though its default transport needs a Tokio runtime to run on. The blocking client, behind the `ureq` feature (below), is the same without the `.await`:
 
@@ -141,7 +141,7 @@ pub struct SearchHit {
 }
 ```
 
-`Place` is `Arc<serde_json::Map<String, serde_json::Value>>`: the gazetteer's value untouched, every key as served, and nothing decoded into a Rust type. It's shared rather than copied, because the client keeps the latest search's tiles parsed and a hit points into them; `(*hit.place).clone()` gives you a copy of your own. `hit.name()` reads `name` when it's a string, and `hit.location()` returns the point and box the client read from `locations`, the same ones `distance` was measured to.
+`Place` is `Arc<serde_json::Map<String, serde_json::Value>>`: the gazetteer's value untouched, every key as served, and nothing decoded into a Rust type. It's shared rather than copied, because the client keeps the latest search's tiles parsed and a hit points into them; `(*hit.place).clone()` gives you a copy of your own. `hit.name()` reads `name` when it's a string (else `None`), and `hit.location()` returns the point and box the client read from `locations`, in the lexicon's field names (`south`, `west`, `north`, `east`; `west > east` crosses the antimeridian), the same ones `distance` was measured to.
 
 #### Attribution
 
@@ -166,19 +166,21 @@ You own what you're given. `Attribution` is plain owned data, so changing an ent
 
 The result types are `#[non_exhaustive]`, so fields can be added without a major release. The price is that you can't build one with a struct literal.
 
-When there's text, places scoring below 0.6 are dropped.
+When there's text, places scoring below 0.6 are dropped. The rest rank in two tiers, whatever the sort mode: a place with a name (its own or a variant) that has every word of the query as the start of one of its words (apostrophes ignored, other punctuation splitting words, so `mcdonalds` finds `McDonald's` and `st louis` finds `St. Louis`) comes before one that matches only fuzzily. Within a tier, the sort mode decides.
 
 Sort modes:
 
-- `Fused` orders by text similarity (best first), breaking near-ties by the hit's `importance`, then by distance. Without text, that means importance, then distance. This is the one you usually want.
-- `Distance` orders nearest first, then smaller place first (so the most specific of the places containing the center leads), then by importance, then similarity. Text still filters out poor matches.
-- `Similarity` orders by text similarity, then nearest first. It's an error without text.
+- `Fused` orders by tier, then text similarity (best first), breaking near-ties by the hit's `importance`, then by distance. Without text, that means importance, then distance. This is the one you usually want.
+- `Distance` orders by tier, then nearest first, then smaller place first (so the most specific of the places containing the center leads), then by importance, then similarity. Text still filters out poor matches.
+- `Similarity` orders by tier, then text similarity, then nearest first. It's an error without text.
 
 Similarity is compared to three decimal places, so scores that differ only beyond that count as ties. Remaining ties break on `origin` (a hit with no `origin` sorts last), so ordering is deterministic.
 
 #### Overview answers
 
 When a region is too large for the server's regular tile budget and the collection has an overview, the server answers with that instead: a coarse tileset holding only the most important places. The search still runs normally over those tiles, and `overview` is `true`. The list is not everything in the region.
+
+With text, an overview answer keeps only the places that match every query word (tier 1): fuzzy matches are dropped, since the coarse set can't hold the place you meant. If either half of an antimeridian-crossing search gets an overview answer, fuzzy matches are dropped from both.
 
 `overview` and `complete` are independent: `complete` says whether every tile the server named loaded, and `overview` says whether the server named a thin set of tiles to begin with. If `overview` is `true`, don't treat the results as exhaustive. Show something like "zoom in for more" and search a smaller region to get the full set.
 
@@ -283,7 +285,7 @@ There is no persistence; a new client starts cold. Neither default transport has
 cargo test --all-features
 ```
 
-`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization, Jaro-Winkler and lenient-reader fixtures and the contract's worked tables. `tests/attribution.rs` runs the attribution scenarios, with a fresh client each, and again with the tiles arriving in reverse URL order. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
+`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization, Jaro-Winkler, match tier and lenient-reader fixtures and the contract's worked tables. `tests/attribution.rs` runs the attribution scenarios, with a fresh client each, and again with the tiles arriving in reverse URL order. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
 
 `CONFORMANCE.md` lists where this port differs from the reference at the edges the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open, mostly in how malformed JSON and odd URLs are handled. None of it comes up with a garganorn server. [`rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js is the design this port was built to, and `DECISIONS.md` records where the build departed from it.
 

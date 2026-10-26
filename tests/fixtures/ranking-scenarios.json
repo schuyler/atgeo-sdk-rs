@@ -1212,5 +1212,375 @@
         }
       ]
     }
+  },
+  {
+    "name": "overview-drops-fuzzy",
+    "description": "On an overview answer, hits that only match fuzzily are dropped, so a query that matches nothing exactly returns nothing.",
+    "overview": true,
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "starbucks",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-fabric",
+          "name": "Star Fabric",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761500",
+              "longitude": "-122.418000"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-wax",
+          "name": "Star Wax",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758000",
+              "longitude": "-122.420000"
+            }
+          ]
+        },
+        "importance": 80
+      }
+    ],
+    "expect": {
+      "top": [],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:star-fabric",
+        "urn:atgeo:overturemaps.org:place:star-wax"
+      ]
+    }
+  },
+  {
+    "name": "overview-keeps-exact",
+    "description": "On an overview answer, hits whose every query token prefixes a name token stay, and fuzzy hits are dropped.",
+    "overview": true,
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "starbucks",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:starbucks",
+          "name": "Starbucks",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.762000",
+              "longitude": "-122.417000"
+            }
+          ]
+        },
+        "importance": 40
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-fabric",
+          "name": "Star Fabric",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761500",
+              "longitude": "-122.418000"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:starbucks"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:star-fabric"
+      ]
+    }
+  },
+  {
+    "name": "tier-before-score",
+    "description": "An exact (tier 1) match outranks a fuzzy (tier 2) match even when the fuzzy one scores higher and is more important.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "coffee",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:la-colombe",
+          "name": "La Colombe Coffee Workshop",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:coffeys",
+          "name": "Coffey's",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.759000",
+              "longitude": "-122.420000"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:la-colombe"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "similarity-tier-before-score",
+    "description": "Similarity sort puts tier first too: the tier-1 exact-token match ranks above a tier-2 fuzzy name that scores higher.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "coffee",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:la-colombe",
+          "name": "La Colombe Coffee Workshop",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:coffeys",
+          "name": "Coffey's",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.759000",
+              "longitude": "-122.420000"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:la-colombe"
+          ]
+        }
+      ]
+    },
+    "sort": "similarity"
+  },
+  {
+    "name": "distance-mode-tier-first",
+    "description": "In distance mode an exact match ranks before a nearer fuzzy match, and the fuzzy match is still returned.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "starbucks",
+    "sort": "distance",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-fabric",
+          "name": "Star Fabric",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.759900",
+              "longitude": "-122.419500"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:starbucks-reserve",
+          "name": "Starbucks Reserve",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.766000",
+              "longitude": "-122.414000"
+            }
+          ]
+        },
+        "importance": 10
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:starbucks-reserve"
+          ]
+        },
+        {
+          "k": 2,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:star-fabric"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "regular-keeps-fuzzy",
+    "description": "The same records as overview-drops-fuzzy in a regular answer: fuzzy matches are returned.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "starbucks",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-fabric",
+          "name": "Star Fabric",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761500",
+              "longitude": "-122.418000"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:star-wax",
+          "name": "Star Wax",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.758000",
+              "longitude": "-122.420000"
+            }
+          ]
+        },
+        "importance": 80
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 2,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:star-fabric",
+            "urn:atgeo:overturemaps.org:place:star-wax"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "tier-one-below-threshold-dropped",
+    "description": "A tier-1 record still has to clear the 0.6 threshold: \"x.y\" folds to tokens x and y, which prefix \"Yellow Xylophone Workshop\", but its score is about 0.54, so it is dropped.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "x.y",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:yellow-xylophone",
+          "name": "Yellow Xylophone Workshop",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 20
+      }
+    ],
+    "expect": {
+      "top": [],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:yellow-xylophone"
+      ]
+    }
   }
 ]

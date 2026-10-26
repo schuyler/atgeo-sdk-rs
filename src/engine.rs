@@ -304,7 +304,7 @@ impl Engine {
                 }
             }
         }
-        let places = rank(kept, center(&plan.region), plan.query.as_ref(), plan.sort);
+        let places = rank(kept, center(&plan.region), plan.query.as_ref(), plan.sort, overview);
 
         *lock(&self.parsed) = used.into_iter().collect();
 
