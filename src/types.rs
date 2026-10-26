@@ -464,6 +464,37 @@ mod tests {
     use super::*;
     use crate::error::{AtgeoError, DecodingError};
 
+    fn record_of(place: serde_json::Value) -> PlaceRecord {
+        let serde_json::Value::Object(map) = place else { unreachable!() };
+        PlaceRecord { origin: "urn:x:1".into(), place: Arc::new(map), importance: None, attribution: Vec::new() }
+    }
+
+    // Contract §8/§9: `name` is the place's name only when it is a string; `location` is what §5 reads.
+    #[test]
+    fn place_record_name_is_none_unless_a_string() {
+        assert_eq!(record_of(serde_json::json!({ "name": "Cafe" })).name(), Some("Cafe"));
+        assert_eq!(record_of(serde_json::json!({})).name(), None);
+        assert_eq!(record_of(serde_json::json!({ "name": 5 })).name(), None);
+        assert_eq!(record_of(serde_json::json!({ "name": null })).name(), None);
+        assert_eq!(record_of(serde_json::json!({ "name": ["Cafe"] })).name(), None);
+    }
+
+    #[test]
+    fn place_record_location_is_the_first_usable_point_and_box() {
+        let record = record_of(serde_json::json!({ "locations": [
+            { "$type": "community.lexicon.location.geo", "latitude": "x", "longitude": "1" },
+            { "$type": "community.lexicon.location.geo", "latitude": "40.5", "longitude": -74.25 },
+            { "$type": "community.lexicon.location.bbox", "south": "1", "west": "170", "north": "2", "east": "-170" },
+            { "$type": "community.lexicon.location.geo", "latitude": "1", "longitude": "1" }
+        ] }));
+        let location = record.location();
+        assert_eq!(location.point.map(|p| (p.lat, p.lon)), Some((40.5, -74.25)));
+        let b = location.bbox.unwrap();
+        assert_eq!((b.south, b.west, b.north, b.east), (1.0, 170.0, 2.0, -170.0));
+        let empty = record_of(serde_json::json!({ "locations": "no" })).location();
+        assert_eq!((empty.point, empty.bbox), (None, None));
+    }
+
     fn hash_of(f: &TileFailure) -> u64 {
         let mut h = DefaultHasher::new();
         f.hash(&mut h);
