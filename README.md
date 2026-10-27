@@ -27,7 +27,7 @@ async fn main() -> Result<(), atgeo::Error> {
 }
 ```
 
-Misspellings are fine; matching is fuzzy (words that match exactly rank first), and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org has a limited dataset for now, mostly the east coast, so a search elsewhere may come back empty. If `result.complete` is `false`, some tiles failed to load and the results are partial; `result.tile_failures` says which and why. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
+Misspellings are fine; matching is fuzzy (words that match exactly rank first), and that finds the Starbucks around Philadelphia's City Hall. The public server at places.atgeo.org covers the whole world. If `result.complete` is `false`, some tiles failed to load and the results are partial; `result.tile_failures` says which and why. If `result.overview` is `true`, the region was too big to search in full and you got only its most important places; see [Overview answers](#overview-answers).
 
 The async example needs `tokio` (with its `macros` and `rt` features) in your own dependencies for `#[tokio::main]`; the crate itself doesn't depend on Tokio, though its default transport needs a Tokio runtime to run on. The blocking client, behind the `ureq` feature (below), is the same without the `.await`:
 
