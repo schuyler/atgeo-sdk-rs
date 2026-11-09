@@ -4,7 +4,7 @@
 #[macro_use]
 mod common;
 
-use atgeo::{Error, SearchOptions, TileFailureKind};
+use atgeo::{Error, NearbyOptions, TileFailureKind};
 use common::*;
 
 const LIST: &str = "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&collection=place&bbox=-122.42%2C37.77%2C-122.41%2C37.78";
@@ -133,7 +133,7 @@ mod tiles {
                 { "value": "scalar", "uri": "at://x/1" },
                 { "value": { "name": "kept", "locations": [geo("37.775", "-122.415")] }, "uri": "at://x/1" },
             ]));
-            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = kind.client(&tile_serving(&body)).ok(REGION, NearbyOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some("at://x/1".to_owned())]);
         }
     }
@@ -148,7 +148,7 @@ mod tiles {
                 { "value": here("c"), "importance": 9223372036854775807i64 },
                 { "value": here("d"), "importance": 2.9 },
             ]));
-            let result = kind.client(&tile_serving(&body)).ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = kind.client(&tile_serving(&body)).ok(REGION, NearbyOptions::new("overturemaps.org"));
             let by_name = |n: &str| result.places.iter().find(|h| h.name() == Some(n)).unwrap();
             assert_eq!((by_name("x").origin.clone(), by_name("x").importance), (None, None));
             assert_eq!(by_name("b").importance, None);
@@ -210,7 +210,7 @@ mod tiles {
 mod tile_attribution {
     use super::*;
 
-    fn search(kind: Kind, tile_body: Value) -> atgeo::SearchResult {
+    fn search(kind: Kind, tile_body: Value) -> atgeo::NearbySearchResult {
         kind.client(&tile_serving(&tile_body.to_string())).ok(REGION, overture_options())
     }
 

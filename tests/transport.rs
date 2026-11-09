@@ -6,7 +6,7 @@ mod common;
 
 use std::time::Duration;
 
-use atgeo::{Error, Region, SearchOptions, SearchResult, TileFailureKind};
+use atgeo::{Error, NearbyOptions, NearbySearchResult, Region, TileFailureKind};
 use common::*;
 
 fn two_tiles(fail_tiles: &[&str]) -> FakeServer {
@@ -20,12 +20,12 @@ fn two_tiles(fail_tiles: &[&str]) -> FakeServer {
 }
 
 /// Each failed tile's URL, kind and status, in the order the result gives them.
-fn failures(result: &SearchResult) -> Vec<(String, TileFailureKind, Option<u16>)> {
+fn failures(result: &NearbySearchResult) -> Vec<(String, TileFailureKind, Option<u16>)> {
     result.tile_failures.iter().map(|f| (f.url.clone(), f.kind, f.status)).collect()
 }
 
 /// The error a failed tile carries; every failure a search reports has one.
-fn error_of(result: &SearchResult, i: usize) -> &Error {
+fn error_of(result: &NearbySearchResult, i: usize) -> &Error {
     result.tile_failures[i].error.as_deref().expect("a reported failure carries its error")
 }
 
@@ -181,14 +181,14 @@ mod typed_server_errors {
 
     both! {
         fn surfaces_collection_not_found_from_get_tiles(kind: Kind) {
-            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new("overturemaps.org").collection("nope")).unwrap_err();
+            let e = kind.client(&FakeServer::new()).search(REGION, NearbyOptions::new("overturemaps.org").collection("nope")).unwrap_err();
             assert_eq!(code_of(&e), "CollectionNotFound");
         }
     }
 
     both! {
         fn surfaces_dataset_not_found_from_get_tiles(kind: Kind) {
-            let e = kind.client(&FakeServer::new()).search(REGION, SearchOptions::new("example.org")).unwrap_err();
+            let e = kind.client(&FakeServer::new()).search(REGION, NearbyOptions::new("example.org")).unwrap_err();
             assert_eq!(code_of(&e), "DatasetNotFound");
         }
     }

@@ -7,17 +7,18 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
-use crate::attribution::{collection_prefix, in_collection, merge};
+use crate::attribution::{collection_of, collection_prefix, in_collection, merge};
 use crate::cache::{CachedTile, Tile, TileCache, TileRecord, TtlCache};
 use crate::error::{ArgumentError, DecodingError, Error};
 use crate::locations::{in_region, locate, record_key};
 use crate::rank::{cmp_utf16, rank};
-use crate::region::{center, query_bboxes, validate};
-use crate::text::{Query, normalize};
+use crate::region::{center, circle_box, keyword_bbox, query_bboxes, validate};
+use crate::text::{Query, normalize, qualifies};
 use crate::transport::{BoxError, HttpResponse};
 use crate::types::{
-    Attribution, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, TileCounts,
-    TileFailure, TileFailureKind, Tileset,
+    Attribution, Disclosure, FallbackHit, FallbackOptions, FallbackSearchResult, KeywordHit, KeywordOptions,
+    KeywordRegionMode, KeywordSearchResult, NearbyOptions, NearbySearchResult, PlaceRecord, Region, ServiceDescription,
+    SortMode, TileCounts, TileFailure, TileFailureKind, Tileset,
 };
 use crate::wire::{self, TileList};
 use crate::xrpc;
@@ -57,6 +58,28 @@ pub(crate) enum ListStep {
     Fetch { key: String, url: String },
 }
 
+/// What a nearby search is asked: the options of `search_nearby`, or the nearby half of the fallback, whose
+/// text is its keyword.
+pub(crate) struct NearbyArgs<'a> {
+    pub(crate) dataset: &'a str,
+    pub(crate) collection: Option<&'a str>,
+    pub(crate) text: Option<&'a str>,
+    pub(crate) sort: SortMode,
+}
+
+impl<'a> From<&'a NearbyOptions> for NearbyArgs<'a> {
+    fn from(o: &'a NearbyOptions) -> Self {
+        NearbyArgs { dataset: &o.dataset, collection: o.collection.as_deref(), text: o.text.as_deref(), sort: o.sort }
+    }
+}
+
+impl<'a> From<&'a FallbackOptions> for NearbyArgs<'a> {
+    /// The nearby half of the fallback searches for the keyword.
+    fn from(o: &'a FallbackOptions) -> Self {
+        NearbyArgs { dataset: &o.dataset, collection: o.collection.as_deref(), text: Some(&o.keyword), sort: o.sort }
+    }
+}
+
 /// A validated search, ready to run.
 pub(crate) struct Plan {
     region: Region,
@@ -65,6 +88,8 @@ pub(crate) struct Plan {
     /// `urn:atgeo:{dataset}:{collection}:` when the search has a collection.
     prefix: Option<String>,
     pub(crate) lists: Vec<ListStep>,
+    /// Some tile list is not cached, so a getTiles request will go out (contract §4.11).
+    lists_requested: bool,
 }
 
 /// What one tile needs.
@@ -156,21 +181,21 @@ impl Engine {
         }
     }
 
-    // --- searchPlaces -------------------------------------------------------------------------
+    // --- searchNearby -------------------------------------------------------------------------
 
-    /// Validates in the contract's order (§3) and plans the tile lists, before any request.
-    pub(crate) fn plan(&self, region: Region, options: &SearchOptions) -> Result<Plan, Error> {
+    /// Validates in the contract's order (§3) and plans the tile lists, before any request. The dataset is
+    /// required by the type, so the order starts with the region.
+    pub(crate) fn plan(&self, region: Region, args: &NearbyArgs<'_>) -> Result<Plan, Error> {
         validate(&region)?;
-        let query = Query::new(&normalize(options.text.as_deref().unwrap_or("")));
-        if options.sort == SortMode::Similarity && query.is_none() {
+        let query = Query::new(&normalize(args.text.unwrap_or("")));
+        if args.sort == SortMode::Similarity && query.is_none() {
             return Err(ArgumentError::SimilarityRequiresText.into());
         }
         self.check_server()?;
 
-        let dataset = options.dataset.as_str();
-        let collection = options.collection.as_deref();
+        let (dataset, collection) = (args.dataset, args.collection);
         let now = self.now();
-        let lists = query_bboxes(&region)
+        let lists: Vec<ListStep> = query_bboxes(&region)
             .into_iter()
             .map(|bbox| {
                 let key = format!("{dataset}|{}|{bbox}", collection.unwrap_or(""));
@@ -186,7 +211,15 @@ impl Engine {
                 ListStep::Fetch { key, url }
             })
             .collect();
-        Ok(Plan { region, query, sort: options.sort, prefix: collection.map(|c| collection_prefix(dataset, c)), lists })
+        let lists_requested = lists.iter().any(|l| matches!(l, ListStep::Fetch { .. }));
+        Ok(Plan {
+            region,
+            query,
+            sort: args.sort,
+            prefix: collection.map(|c| collection_prefix(dataset, c)),
+            lists,
+            lists_requested,
+        })
     }
 
     /// Reads a getTiles answer and caches it for an hour; a failure caches nothing.
@@ -272,7 +305,15 @@ impl Engine {
     }
 
     /// Concatenates, dedupes, filters and ranks (§4.5 to §4.9), and keeps this search's parsed tiles.
-    pub(crate) fn assemble(&self, plan: Plan, urls: Vec<String>, overview: bool, slots: Vec<Slot>) -> SearchResult {
+    /// `tiles_requested` is whether a tile fetch was attempted: a URL refused without a request is not.
+    pub(crate) fn assemble(
+        &self,
+        plan: Plan,
+        urls: Vec<String>,
+        overview: bool,
+        slots: Vec<Slot>,
+        tiles_requested: bool,
+    ) -> NearbySearchResult {
         assert_eq!(urls.len(), slots.len(), "one slot per tile URL");
         let mut used: Vec<(String, Used)> = Vec::with_capacity(slots.len());
         let mut tile_failures = Vec::new();
@@ -308,13 +349,130 @@ impl Engine {
 
         *lock(&self.parsed) = used.into_iter().collect();
 
-        SearchResult {
+        // Contract §4.11: the server learned the 0.01° grid if the call asked for a tile list or tried a tile;
+        // a call answered entirely from cache told it nothing.
+        let region = (plan.lists_requested || tiles_requested).then_some(0.01);
+        NearbySearchResult {
             places,
             complete: failed == 0,
             overview,
             tiles: TileCounts { fetched, failed },
             tile_failures,
             attribution,
+            disclosed: Disclosure::new(false, region),
+        }
+    }
+
+    // --- searchByKeyword and the fallback ---------------------------------------------------------
+
+    /// The searchPlaces URL: `dataset`, `collection` only if given, `q` exactly as passed, `bbox` only if
+    /// given (contract §16).
+    fn keyword_url(&self, dataset: &str, collection: Option<&str>, keyword: &str, bbox: Option<&str>) -> String {
+        let mut params = vec![("dataset", dataset)];
+        params.extend(collection.map(|c| ("collection", c)));
+        params.push(("q", keyword));
+        params.extend(bbox.map(|b| ("bbox", b)));
+        self.xrpc_url("org.atgeo.searchPlaces", &params)
+    }
+
+    /// Validates in the contract's order (§3, §16), and builds the request.
+    pub(crate) fn keyword_step(&self, keyword: &str, options: &KeywordOptions) -> Result<String, Error> {
+        if let Some(region) = &options.region {
+            validate(&region.as_region())?;
+        }
+        self.check_server()?;
+        let bbox = options.region.map(|r| keyword_bbox(r.west, r.south, r.east, r.north));
+        Ok(self.keyword_url(&options.dataset, options.collection.as_deref(), keyword, bbox.as_deref()))
+    }
+
+    /// Reads a searchPlaces answer. Nothing from it enters any cache (contract §10). `region_sent` is whether
+    /// the request carried a region.
+    pub(crate) fn accept_keyword(
+        &self,
+        response: Result<HttpResponse, BoxError>,
+        region_sent: bool,
+    ) -> Result<KeywordSearchResult, Error> {
+        let body = Self::checked(response.map_err(Error::Transport)?)?;
+        let found = wire::search_places(&body)?;
+        let attribution = merge(found.iter().map(|p| p.attribution.as_slice()));
+        let places = found
+            .into_iter()
+            .map(|p| KeywordHit {
+                collection: collection_of(&p.value, &p.attribution),
+                origin: p.origin,
+                place: p.value,
+                importance: p.importance,
+            })
+            .collect();
+        Ok(KeywordSearchResult { places, attribution, disclosed: Disclosure::new(true, region_sent.then_some(1.0)) })
+    }
+
+    /// The keyword request of the fallback (contract §18), or `None` when the nearby result stands: a hit
+    /// of match tier 1 is solid, and a keyword the server would refuse is not sent.
+    pub(crate) fn fallback_step(
+        &self,
+        nearby: &NearbySearchResult,
+        region: &Region,
+        options: &FallbackOptions,
+    ) -> Option<String> {
+        // A keyword that normalizes to nothing has no tokens, so every hit is tier 1, as in the reference.
+        let tier_one = match Query::new(&normalize(&options.keyword)) {
+            Some(query) => nearby.places.iter().any(|hit| query.tier(&hit.place) == 1),
+            None => !nearby.places.is_empty(),
+        };
+        if tier_one || !qualifies(&options.keyword) {
+            return None;
+        }
+        let bbox = match (options.keyword_region, *region) {
+            (KeywordRegionMode::Degree, Region::Bbox { west, south, east, north }) => {
+                Some(keyword_bbox(west, south, east, north))
+            }
+            (KeywordRegionMode::Degree, Region::Circle { lat, lon, radius }) => {
+                let (west, south, east, north) = circle_box(lat, lon, radius);
+                Some(keyword_bbox(west, south, east, north))
+            }
+            _ => None,
+        };
+        Some(self.keyword_url(&options.dataset, options.collection.as_deref(), &options.keyword, bbox.as_deref()))
+    }
+
+    /// The fallback's result once its keyword request has been answered (contract §18, steps 6 to 8).
+    pub(crate) fn finish_fallback(
+        nearby: NearbySearchResult,
+        found: Result<KeywordSearchResult, Error>,
+        mode: KeywordRegionMode,
+    ) -> Result<FallbackSearchResult, Error> {
+        let sent_region = match mode {
+            KeywordRegionMode::Degree => Some(1.0),
+            _ => None,
+        };
+        match found {
+            Ok(found) => {
+                let mut nearby = nearby;
+                let origins: HashSet<&str> = found.places.iter().filter_map(|h| h.origin.as_deref()).collect();
+                // A hit with no origin is never left out, even when a keyword hit has none either.
+                let kept: Vec<FallbackHit> = std::mem::take(&mut nearby.places)
+                    .into_iter()
+                    .filter(|h| h.origin.as_deref().is_none_or(|o| !origins.contains(o)))
+                    .map(FallbackHit::Nearby)
+                    .collect();
+                // The nearby entry wins a tie, so it is listed first.
+                let attribution = merge([nearby.attribution.as_slice(), found.attribution.as_slice()]);
+                let region = nearby.disclosed.region.or(found.disclosed.region);
+                let places = found.places.into_iter().map(FallbackHit::Keyword).chain(kept).collect();
+                Ok(FallbackSearchResult {
+                    attribution,
+                    disclosed: Disclosure::new(true, region),
+                    ..fallback_with(nearby, places)
+                })
+            }
+            // The server refused a keyword the qualifying check let through: the nearby result stands, though
+            // the keyword did go out.
+            Err(Error::Atgeo(e)) if e.code == "KeywordRequired" => {
+                let region = nearby.disclosed.region.or(sent_region);
+                Ok(FallbackSearchResult { disclosed: Disclosure::new(true, region), ..fallback(nearby) })
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -377,6 +535,25 @@ impl Engine {
     pub(crate) fn accept_tileset(&self, response: Result<HttpResponse, BoxError>) -> Result<Tileset, Error> {
         let body = Self::checked(response.map_err(Error::Transport)?)?;
         Ok(wire::tileset(&body)?)
+    }
+}
+
+/// The nearby result as a fallback result, with its own `disclosed`.
+pub(crate) fn fallback(mut nearby: NearbySearchResult) -> FallbackSearchResult {
+    let places = std::mem::take(&mut nearby.places).into_iter().map(FallbackHit::Nearby).collect();
+    fallback_with(nearby, places)
+}
+
+/// The nearby result's other fields around these places.
+fn fallback_with(nearby: NearbySearchResult, places: Vec<FallbackHit>) -> FallbackSearchResult {
+    FallbackSearchResult {
+        places,
+        complete: nearby.complete,
+        overview: nearby.overview,
+        tiles: nearby.tiles,
+        tile_failures: nearby.tile_failures,
+        attribution: nearby.attribution,
+        disclosed: nearby.disclosed,
     }
 }
 

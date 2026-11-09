@@ -6,14 +6,17 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::SystemTime;
 
-use crate::engine::{Engine, ListStep, MAX_TILES_IN_FLIGHT, Slot, Step, TileStep};
+use crate::engine::{Engine, ListStep, MAX_TILES_IN_FLIGHT, NearbyArgs, Slot, Step, TileStep, fallback};
 use crate::error::Error;
 use crate::transport::{BoxError, HttpResponse};
-use crate::types::{PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, Tileset};
+use crate::types::{
+    FallbackOptions, FallbackSearchResult, KeywordOptions, KeywordRegionMode, KeywordSearchResult, NearbyOptions,
+    NearbySearchResult, PlaceRecord, Region, ServiceDescription, Tileset,
+};
 use crate::wire::TileList;
 
 /// How the blocking client makes requests.
@@ -103,16 +106,47 @@ impl<T: HttpTransport> AtgeoClient<T> {
         }
     }
 
-    fn tile(&self, url: &str) -> Slot {
+    fn tile(&self, url: &str, attempted: &AtomicBool) -> Slot {
         match self.engine.tile_step(url) {
             TileStep::Done(slot) => slot,
-            TileStep::Fetch(prepared) => self.engine.accept_tile(url, self.transport.get(&prepared)),
+            TileStep::Fetch(prepared) => {
+                attempted.store(true, Ordering::Relaxed);
+                self.engine.accept_tile(url, self.transport.get(&prepared))
+            }
         }
     }
 
-    /// Searches a region; see the async [`crate::AtgeoClient::search_places`].
-    pub fn search_places(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
-        let mut plan = self.engine.plan(region, &options)?;
+    /// Searches a region; see the async [`crate::AtgeoClient::search_nearby`].
+    pub fn search_nearby(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error> {
+        self.nearby(region, NearbyArgs::from(&options))
+    }
+
+    /// Asks the server for places whose names match the keyword's words, **sending the keyword**; see the
+    /// async [`crate::AtgeoClient::search_by_keyword`], which has the details and the privacy trade.
+    pub fn search_by_keyword(&self, keyword: &str, options: KeywordOptions) -> Result<KeywordSearchResult, Error> {
+        let url = self.engine.keyword_step(keyword, &options)?;
+        self.engine.accept_keyword(self.transport.get(&url), options.region.is_some())
+    }
+
+    /// A nearby search for the keyword on the device, and, only if that finds no solid hit, **a keyword
+    /// request**; see the async [`crate::AtgeoClient::search_nearby_then_by_keyword`]. A failure after the
+    /// nearby half means the keyword may have reached the server.
+    pub fn search_nearby_then_by_keyword(
+        &self,
+        region: Region,
+        options: FallbackOptions,
+    ) -> Result<FallbackSearchResult, Error> {
+        let nearby = self.nearby(region, NearbyArgs::from(&options))?;
+        let Some(url) = self.engine.fallback_step(&nearby, &region, &options) else {
+            return Ok(fallback(nearby));
+        };
+        let found =
+            self.engine.accept_keyword(self.transport.get(&url), options.keyword_region == KeywordRegionMode::Degree);
+        Engine::finish_fallback(nearby, found, options.keyword_region)
+    }
+
+    fn nearby(&self, region: Region, args: NearbyArgs<'_>) -> Result<NearbySearchResult, Error> {
+        let mut plan = self.engine.plan(region, &args)?;
         let steps = std::mem::take(&mut plan.lists);
         let fetches = steps.iter().filter(|s| matches!(s, ListStep::Fetch { .. })).count();
         // Both halves are joined before returning, since a blocking request cannot be cancelled; collecting
@@ -131,6 +165,7 @@ impl<T: HttpTransport> AtgeoClient<T> {
 
         let n = urls.len();
         let next = AtomicUsize::new(0);
+        let attempted = AtomicBool::new(false);
         let worker = || {
             let mut done = Vec::new();
             loop {
@@ -138,14 +173,15 @@ impl<T: HttpTransport> AtgeoClient<T> {
                 if i >= n {
                     return done;
                 }
-                done.push((i, self.tile(&urls[i])));
+                done.push((i, self.tile(&urls[i], &attempted)));
             }
         };
         let finished: Vec<Vec<(usize, Slot)>> = thread::scope(|s| {
             let handles: Vec<_> = (0..n.min(MAX_TILES_IN_FLIGHT)).map(|_| s.spawn(worker)).collect();
             handles.into_iter().map(joined).collect()
         });
-        Ok(self.engine.assemble(plan, urls, overview, Engine::in_url_order(finished.into_iter().flatten())))
+        let slots = Engine::in_url_order(finished.into_iter().flatten());
+        Ok(self.engine.assemble(plan, urls, overview, slots, attempted.load(Ordering::Relaxed)))
     }
 
     /// One place by its origin; see the async [`crate::AtgeoClient::get_place`].

@@ -5,6 +5,7 @@
 )]
 
 mod attribution;
+mod autocomplete;
 mod cache;
 mod client;
 mod engine;
@@ -21,15 +22,18 @@ mod xrpc;
 #[cfg(feature = "blocking")]
 pub mod blocking;
 
+pub use autocomplete::KeywordAutocomplete;
 pub use client::AtgeoClient;
 pub use error::{ArgumentError, AtgeoError, DecodingError, Error};
 #[cfg(feature = "reqwest")]
 pub use transport::ReqwestTransport;
 pub use transport::{BoxError, HttpResponse, HttpTransport};
 pub use types::{
-    Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionKey, CollectionRef, Extent, Place,
-    PlaceBox, PlaceLocation, PlacePoint, PlaceRecord, Region, SearchHit, SearchOptions, SearchResult, ServedTileset,
-    ServiceDescription, SortMode, TileCounts, TileFailure, TileFailureKind, Tileset, TilesetOverview,
+    Attribution, CategoryCount, CollectionAttribution, CollectionInfo, CollectionKey, CollectionRef, Disclosure,
+    Extent, FallbackHit, FallbackOptions, FallbackSearchResult, KeywordHit, KeywordOptions, KeywordRegion,
+    KeywordRegionMode, KeywordSearchResult, NearbyHit, NearbyOptions, NearbySearchResult, Place, PlaceBox,
+    PlaceLocation, PlacePoint, PlaceRecord, Region, ServedTileset, ServiceDescription, SortMode, TileCounts,
+    TileFailure, TileFailureKind, Tileset, TilesetOverview,
 };
 
 /// The server a client talks to unless told otherwise.

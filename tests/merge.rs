@@ -5,7 +5,7 @@ mod common;
 
 use std::time::Duration;
 
-use atgeo::{Region, SearchOptions};
+use atgeo::{NearbyOptions, Region};
 use common::*;
 
 fn search(kind: Kind, records: Vec<Value>, region: Region) -> Vec<String> {
@@ -32,7 +32,7 @@ fn division(id: &str, name: &str) -> Value {
     )
 }
 
-fn names(r: &atgeo::SearchResult) -> Vec<String> {
+fn names(r: &atgeo::NearbySearchResult) -> Vec<String> {
     r.places.iter().map(|h| h.name().unwrap().to_owned()).collect()
 }
 
@@ -70,7 +70,7 @@ mod deduplication {
                 tile(&url("a"), vec![rec(division("d1", "Springfield"))]),
                 tile(&url("b"), vec![rec(division("d1", "Springfield"))]),
             ])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org").collection("division"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("overturemaps.org").collection("division"));
             assert_eq!(origins(&result), [Some("urn:atgeo:overturemaps.org:division:d1".to_owned())]);
         }
     }
@@ -96,7 +96,7 @@ mod deduplication {
         fn keeps_two_records_that_have_neither_origin_nor_uri(kind: Kind) {
             let anonymous = |name: &str| place("x", name, vec![point(37.775, -122.415)], json!({ "origin": null }));
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![rec(anonymous("One")), rec(anonymous("Two"))])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("overturemaps.org"));
             let mut got = names(&result);
             got.sort();
             assert_eq!(got, ["One", "Two"]);
@@ -108,7 +108,7 @@ mod deduplication {
         fn identifies_an_origin_less_record_by_its_uri(kind: Kind) {
             let value = place("x", "By uri", vec![point(37.775, -122.415)], json!({ "origin": null }));
             let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), vec![record(value, None, Some("https://example.org/r/1"))])])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some("https://example.org/r/1".to_owned())]);
         }
     }
@@ -125,7 +125,7 @@ mod ordering_ties {
                 &url("a"),
                 vec![same("x", json!({ "origin": null })), same("c", json!({})), same("a", json!({})), same("b", json!({}))],
             )])]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("overturemaps.org"));
             assert_eq!(origins(&result), [Some(place_origin("a")), Some(place_origin("b")), Some(place_origin("c")), None]);
         }
     }
@@ -279,13 +279,13 @@ mod determinism {
             tile(
                 &url("a"),
                 vec![
-                    r("dup", "Copy A", 37.775, -122.415),
+                    r("dup", "Alpha Copy A", 37.775, -122.415),
                     r("a1", "Alpha", 37.772, -122.412),
                     r("a2", "Alpha", 37.772, -122.412),
                 ],
             ),
-            tile(&url("b"), vec![r("dup", "Copy B", 37.775, -122.415), r("b1", "Alpha", 37.772, -122.412)]),
-            tile(&url("c"), vec![r("dup", "Copy C", 37.775, -122.415), r("c1", "Alpha", 37.772, -122.412)]),
+            tile(&url("b"), vec![r("dup", "Alpha Copy B", 37.775, -122.415), r("b1", "Alpha", 37.772, -122.412)]),
+            tile(&url("c"), vec![r("dup", "Alpha Copy C", 37.775, -122.415), r("c1", "Alpha", 37.772, -122.412)]),
         ]
     }
 
@@ -323,7 +323,7 @@ mod determinism {
                 assert!(outputs.windows(2).all(|w| w[0] == w[1]), "{text:?}");
                 assert_eq!(ids_sorted(&outputs[0]), ["a1", "a2", "b1", "c1", "dup"]);
                 let dup = outputs[0].places.iter().find(|h| h.origin == Some(place_origin("dup"))).unwrap();
-                assert_eq!(dup.name(), Some("Copy A"));
+                assert_eq!(dup.name(), Some("Alpha Copy A"));
             }
         }
     }

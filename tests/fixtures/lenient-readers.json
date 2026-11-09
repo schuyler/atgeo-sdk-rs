@@ -1685,5 +1685,438 @@
     "name": "no usable body: empty array",
     "body": [],
     "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: null body",
+    "body": null,
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: array body",
+    "body": [],
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: string body",
+    "body": "x",
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: number body",
+    "body": 5,
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: empty object",
+    "body": {},
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: places is null",
+    "body": {
+      "places": null
+    },
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: places is an object",
+    "body": {
+      "places": {}
+    },
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "no usable body: places is a string",
+    "body": {
+      "places": "x"
+    },
+    "decodingError": true
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "empty list",
+    "body": {
+      "places": []
+    },
+    "result": {
+      "places": []
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "the full answer",
+    "body": {
+      "places": [
+        {
+          "uri": "urn:atgeo:d:c:1",
+          "url": "https://x.example/d/c/1",
+          "importance": 5,
+          "value": {
+            "origin": "urn:atgeo:d:c:1",
+            "name": "A",
+            "extra": [
+              1
+            ]
+          },
+          "attribution": [
+            {
+              "dataset": "d",
+              "collection": "c",
+              "licenses": [
+                "l"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "urn:atgeo:d:c:1",
+          "value": {
+            "origin": "urn:atgeo:d:c:1",
+            "name": "A",
+            "extra": [
+              1
+            ]
+          },
+          "importance": 5,
+          "attribution": [
+            {
+              "dataset": "d",
+              "collection": "c",
+              "licenses": [
+                "l"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "served order is kept and nothing is deduplicated",
+    "body": {
+      "places": [
+        {
+          "value": {
+            "origin": "z"
+          }
+        },
+        {
+          "value": {
+            "origin": "a"
+          }
+        },
+        {
+          "value": {
+            "origin": "z"
+          }
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "z",
+          "value": {
+            "origin": "z"
+          },
+          "attribution": []
+        },
+        {
+          "origin": "a",
+          "value": {
+            "origin": "a"
+          },
+          "attribution": []
+        },
+        {
+          "origin": "z",
+          "value": {
+            "origin": "z"
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "elements that are not usable are skipped",
+    "body": {
+      "places": [
+        null,
+        5,
+        "x",
+        [],
+        {},
+        {
+          "uri": "u"
+        },
+        {
+          "value": null
+        },
+        {
+          "value": []
+        },
+        {
+          "value": "x"
+        },
+        {
+          "value": 5
+        },
+        {
+          "value": {
+            "origin": "ok"
+          }
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "ok",
+          "value": {
+            "origin": "ok"
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "origin is the value's origin when that is a string",
+    "body": {
+      "places": [
+        {
+          "uri": "urn:uri",
+          "value": {
+            "origin": "urn:value"
+          }
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "urn:value",
+          "value": {
+            "origin": "urn:value"
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "origin falls back to uri when the value has none",
+    "body": {
+      "places": [
+        {
+          "uri": "urn:uri",
+          "value": {
+            "name": "A"
+          }
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "urn:uri",
+          "value": {
+            "name": "A"
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "origin falls back to uri when the value's origin is not a string",
+    "body": {
+      "places": [
+        {
+          "uri": "urn:uri",
+          "value": {
+            "origin": 7
+          }
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "urn:uri",
+          "value": {
+            "origin": 7
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "origin is null when neither is a string",
+    "body": {
+      "places": [
+        {
+          "uri": 7,
+          "value": {
+            "origin": null
+          }
+        },
+        {
+          "value": {}
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": null,
+          "value": {
+            "origin": null
+          },
+          "attribution": []
+        },
+        {
+          "origin": null,
+          "value": {},
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "a fractional importance is truncated toward zero",
+    "body": {
+      "places": [
+        {
+          "value": {
+            "origin": "o"
+          },
+          "importance": -2.9
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "o",
+          "value": {
+            "origin": "o"
+          },
+          "importance": -2,
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "non-number importance is absent",
+    "body": {
+      "places": [
+        {
+          "value": {
+            "origin": "o"
+          },
+          "importance": "5"
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "o",
+          "value": {
+            "origin": "o"
+          },
+          "attribution": []
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "attribution is read leniently",
+    "body": {
+      "places": [
+        {
+          "value": {
+            "origin": "o"
+          },
+          "attribution": [
+            null,
+            {
+              "dataset": "d"
+            },
+            {
+              "dataset": "d",
+              "collection": "c",
+              "licenses": "l"
+            }
+          ]
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "o",
+          "value": {
+            "origin": "o"
+          },
+          "attribution": [
+            {
+              "dataset": "d",
+              "collection": "c"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "reader": "searchPlaces",
+    "name": "attribution that is not an array is empty",
+    "body": {
+      "places": [
+        {
+          "value": {
+            "origin": "o"
+          },
+          "attribution": "x"
+        }
+      ]
+    },
+    "result": {
+      "places": [
+        {
+          "origin": "o",
+          "value": {
+            "origin": "o"
+          },
+          "attribution": []
+        }
+      ]
+    }
   }
 ]

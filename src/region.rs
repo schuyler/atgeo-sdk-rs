@@ -90,7 +90,7 @@ pub(crate) fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 }
 
 /// The circle's enclosing box, `(min_lon, min_lat, max_lon, max_lat)`; `min_lon > max_lon` when it wraps.
-fn circle_box(lat: f64, lon: f64, radius: f64) -> (f64, f64, f64, f64) {
+pub(crate) fn circle_box(lat: f64, lon: f64, radius: f64) -> (f64, f64, f64, f64) {
     let half = radius / DEG_TO_M;
     let min_lat = (lat - half).max(-90.0);
     let max_lat = (lat + half).min(90.0);
@@ -161,6 +161,38 @@ pub(crate) fn query_bboxes(region: &Region) -> Vec<String> {
         .collect()
 }
 
+/// The smallest whole-degree box the server accepts that covers the box, as the `bbox` string of a keyword
+/// search (contract §16): `west,south,east,north`, plain integers. A zero-width span widens by one cell;
+/// a crossing box whose snapped edges no longer cross validly becomes the full band. The inputs are validated
+/// (finite, in range), so the casts to `i64` hold whole values, and an integer has no negative zero.
+pub(crate) fn keyword_bbox(mut west: f64, south: f64, mut east: f64, north: f64) -> String {
+    let span = |lo: f64, hi: f64, limit: i64| {
+        let (mut lo, mut hi) = (lo.floor() as i64, hi.ceil() as i64);
+        if lo == hi {
+            if hi < limit {
+                hi += 1;
+            } else {
+                lo -= 1;
+            }
+        }
+        (lo, hi)
+    };
+    let (s, n) = span(south, north, 90);
+    // A crossing box is decided on its input values first: west at 180 or east at -180 makes it a plain box.
+    if west == 180.0 && west > east {
+        west = -180.0;
+    }
+    if east == -180.0 && west > east {
+        east = 180.0;
+    }
+    if west > east {
+        let (w, e) = (west.floor() as i64, east.ceil() as i64);
+        return if w > 0 && e < 0 { format!("{w},{s},{e},{n}") } else { format!("-180,{s},180,{n}") };
+    }
+    let (w, e) = span(west, east, 180);
+    format!("{w},{s},{e},{n}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +239,27 @@ mod tests {
         assert!(haversine(-89.0, 0.0, 269.0, 180.0).is_nan());
         assert!((haversine(0.0, 0.0, 1.0, 0.0) - 111195.0802335329).abs() < 1e-6);
         assert!((haversine(37.7749, -122.4194, 34.0522, -118.2437) - 559121.3493517868).abs() < 1e-6);
+    }
+
+    #[test]
+    fn keyword_bbox_snaps_outward_to_whole_degrees() {
+        let kb = |w, s, e, n| keyword_bbox(w, s, e, n);
+        assert_eq!(kb(-122.4194155, 37.7749295, -122.4094155, 37.7849295), "-123,37,-122,38");
+        // A grid-aligned box is not widened.
+        assert_eq!(kb(-76.0, 39.0, -75.0, 40.0), "-76,39,-75,40");
+        // A point is widened by one cell, and a pole or the antimeridian widens the other way.
+        assert_eq!(kb(10.0, 10.0, 10.0, 10.0), "10,10,11,11");
+        assert_eq!(kb(180.0, 90.0, 180.0, 90.0), "179,89,180,90");
+        // No negative zero.
+        assert_eq!(kb(-0.5, -0.5, 0.0, -0.0), "-1,-1,0,0");
+        assert!(!kb(-0.5, -0.5, -0.0, 0.5).contains("-0"));
+        // A crossing box stays crossing while its snapped edges still cross; else the full band.
+        assert_eq!(kb(170.5, 10.0, -170.5, 20.0), "170,10,-170,20");
+        assert_eq!(kb(0.5, 10.0, -0.5, 20.0), "-180,10,180,20");
+        assert_eq!(kb(170.5, 10.0, 160.5, 20.0), "-180,10,180,20");
+        // West at 180 or east at -180 is the other meridian; both at once is a one-cell box.
+        assert_eq!(kb(180.0, 10.0, -170.0, 20.0), "-180,10,-170,20");
+        assert_eq!(kb(170.0, 10.0, -180.0, 20.0), "170,10,180,20");
+        assert_eq!(kb(180.0, 10.0, -180.0, 20.0), "-180,10,-179,20");
     }
 }

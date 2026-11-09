@@ -10,7 +10,7 @@ mod common;
 
 use std::time::Duration;
 
-use atgeo::{SearchOptions, SearchResult};
+use atgeo::{NearbyOptions, NearbySearchResult};
 use common::*;
 
 /// The default error body of a tile that has a `status` and no `body`.
@@ -49,9 +49,9 @@ fn server_for(s: &Value, delays: &[(String, Duration)]) -> FakeServer {
     fake
 }
 
-fn options_for(s: &Value) -> SearchOptions {
+fn options_for(s: &Value) -> NearbyOptions {
     // The search has no text and the default sort.
-    let o = SearchOptions::new(s["dataset"].as_str().unwrap());
+    let o = NearbyOptions::new(s["dataset"].as_str().unwrap());
     match s.get("collection").and_then(Value::as_str) {
         Some(c) => o.collection(c),
         None => o,
@@ -64,7 +64,7 @@ fn pair_key(origin: &Option<String>, collection: &Value) -> String {
 }
 
 /// One line per failed expectation of the scenario against its result.
-fn check(s: &Value, result: &SearchResult, failures: &mut Vec<String>) {
+fn check(s: &Value, result: &NearbySearchResult, failures: &mut Vec<String>) {
     let name = s["name"].as_str().unwrap();
     let want_attribution = &s["expect"]["attribution"];
     let got_attribution = attribution_json(&result.attribution);
@@ -157,7 +157,7 @@ both! {
         fake.raw(a, 200, body("from-a").to_string());
         fake.raw(b, 200, body("from-b").to_string());
         fake.delay(a, Duration::from_millis(50));
-        let result = kind.client(&fake).ok(REGION, SearchOptions::new("d"));
+        let result = kind.client(&fake).ok(REGION, NearbyOptions::new("d"));
         assert_eq!(attribution_json(&result.attribution), json!([{ "dataset": "d", "collection": "c", "release": "from-a" }]));
     }
 }
@@ -182,7 +182,7 @@ both! {
             entry(low, "z"), entry(astral, "z"), entry("d", astral), entry("d", low), entry("D", "c"),
         ] });
         fake.raw(a, 200, body.to_string());
-        let result = kind.client(&fake).ok(REGION, SearchOptions::new("d"));
+        let result = kind.client(&fake).ok(REGION, NearbyOptions::new("d"));
         assert_eq!(
             attribution_json(&result.attribution),
             json!([entry("D", "c"), entry("d", astral), entry("d", low), entry(astral, "z"), entry(low, "z")])
@@ -218,7 +218,7 @@ fn two_tiles(a_name: &str) -> FakeServer {
 
 both! {
     fn each_hit_takes_the_collection_of_its_own_tile(kind: Kind) {
-        let result = kind.client(&two_tiles("Cafe")).ok(REGION, SearchOptions::new("d"));
+        let result = kind.client(&two_tiles("Cafe")).ok(REGION, NearbyOptions::new("d"));
         let mut got: Vec<(String, Value)> =
             result.places.iter().map(|h| (h.origin.clone().unwrap(), collection_json(&h.collection))).collect();
         got.sort_by(|x, y| x.0.cmp(&y.0));
@@ -231,7 +231,7 @@ both! {
 
 both! {
     fn a_record_the_text_filter_drops_does_not_shift_the_collections_of_the_rest(kind: Kind) {
-        let result = kind.client(&two_tiles("Zzzzqqq")).ok(REGION, SearchOptions::new("d").text("Cafe"));
+        let result = kind.client(&two_tiles("Zzzzqqq")).ok(REGION, NearbyOptions::new("d").text("Cafe"));
         assert_eq!(origins(&result), [Some("urn:atgeo:d:c2:2".to_owned())]);
         assert_eq!(collection_json(&result.places[0].collection), json!({ "dataset": "d", "collection": "c2" }));
     }

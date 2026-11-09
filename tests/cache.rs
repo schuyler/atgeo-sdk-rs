@@ -52,7 +52,12 @@ mod warm_regions {
             let first = client.ok(REGION, overture_options().text("Alpha"));
             fake.go_offline();
             let second = client.ok(REGION, overture_options().text("Alpha"));
-            assert_eq!(second, first);
+            // Everything but what the server learned during the call: the warm call told it nothing.
+            assert_eq!(disclosed(&first), (false, Some(0.01)));
+            assert_eq!(disclosed(&second), (false, None));
+            let mut expected = first.clone();
+            expected.disclosed = second.disclosed;
+            assert_eq!(second, expected);
             assert!(!first.places.is_empty());
         }
     }
@@ -312,7 +317,7 @@ mod attribution_in_the_tile_cache {
             fake.go_offline();
             let second = client.ok(REGION, overture_options());
             assert_eq!(second.attribution, first.attribution);
-            let collections = |r: &atgeo::SearchResult| r.places.iter().map(|h| h.collection.clone()).collect::<Vec<_>>();
+            let collections = |r: &atgeo::NearbySearchResult| r.places.iter().map(|h| h.collection.clone()).collect::<Vec<_>>();
             assert_eq!(collections(&second), collections(&first));
         }
     }
@@ -362,7 +367,7 @@ mod attribution_in_the_tile_cache {
             let again = client.ok(REGION, overture_options());
             assert_eq!(again.attribution, first.attribution);
             assert_eq!(attribution_json(&again.attribution).as_array().unwrap().len(), 2);
-            let collections = |r: &atgeo::SearchResult| r.places.iter().map(|h| h.collection.clone()).collect::<Vec<_>>();
+            let collections = |r: &atgeo::NearbySearchResult| r.places.iter().map(|h| h.collection.clone()).collect::<Vec<_>>();
             assert_eq!(collections(&again), collections(&first));
             assert!(collections(&again).iter().all(Option::is_some));
         }

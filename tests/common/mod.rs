@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use atgeo::{
-    Attribution, CollectionKey, Error, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, Tileset,
+    Attribution, CollectionKey, Error, FallbackOptions, FallbackSearchResult, KeywordOptions, KeywordSearchResult,
+    NearbyOptions, NearbySearchResult, PlaceRecord, Region, ServiceDescription, Tileset,
 };
 
 pub use fake::*;
@@ -109,17 +110,33 @@ impl Kind {
 }
 
 impl Client {
-    pub fn search(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
+    pub fn search(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error> {
         match &self.0 {
-            Inner::Async(c, rt) => rt.block_on(c.search_places(region, options)),
+            Inner::Async(c, rt) => rt.block_on(c.search_nearby(region, options)),
             #[cfg(feature = "blocking")]
-            Inner::Blocking(c) => c.search_places(region, options),
+            Inner::Blocking(c) => c.search_nearby(region, options),
         }
     }
 
     /// A search that must succeed.
-    pub fn ok(&self, region: Region, options: SearchOptions) -> SearchResult {
+    pub fn ok(&self, region: Region, options: NearbyOptions) -> NearbySearchResult {
         self.search(region, options).unwrap()
+    }
+
+    pub fn keyword(&self, keyword: &str, options: KeywordOptions) -> Result<KeywordSearchResult, Error> {
+        match &self.0 {
+            Inner::Async(c, rt) => rt.block_on(c.search_by_keyword(keyword, options)),
+            #[cfg(feature = "blocking")]
+            Inner::Blocking(c) => c.search_by_keyword(keyword, options),
+        }
+    }
+
+    pub fn fallback(&self, region: Region, options: FallbackOptions) -> Result<FallbackSearchResult, Error> {
+        match &self.0 {
+            Inner::Async(c, rt) => rt.block_on(c.search_nearby_then_by_keyword(region, options)),
+            #[cfg(feature = "blocking")]
+            Inner::Blocking(c) => c.search_nearby_then_by_keyword(region, options),
+        }
     }
 
     pub fn get_place(&self, origin: &str) -> Result<PlaceRecord, Error> {
@@ -145,6 +162,11 @@ impl Client {
             Inner::Blocking(c) => c.describe_tileset(slug),
         }
     }
+}
+
+/// What the result says the server learned: whether the keyword went out, and the grid of the finest region.
+pub fn disclosed(r: &NearbySearchResult) -> (bool, Option<f64>) {
+    (r.disclosed.keyword, r.disclosed.region)
 }
 
 /// The server's error code, or a panic naming what came back instead.
@@ -207,8 +229,8 @@ pub fn region_from_json(v: &Value) -> Region {
 
 /// The dataset and collection the reference's tests spread into every call (`OVERTURE`): searches have no
 /// defaults (contract §4.1).
-pub fn overture_options() -> SearchOptions {
-    SearchOptions::new("overturemaps.org").collection("place")
+pub fn overture_options() -> NearbyOptions {
+    NearbyOptions::new("overturemaps.org").collection("place")
 }
 
 pub fn url(n: &str) -> String {
@@ -216,12 +238,12 @@ pub fn url(n: &str) -> String {
 }
 
 /// The hits' origins, in order.
-pub fn origins(r: &SearchResult) -> Vec<Option<String>> {
+pub fn origins(r: &NearbySearchResult) -> Vec<Option<String>> {
     r.places.iter().map(|h| h.origin.clone()).collect()
 }
 
 /// The part of each origin after `urn:atgeo:overturemaps.org:place:`, sorted.
-pub fn ids_sorted(r: &SearchResult) -> Vec<String> {
+pub fn ids_sorted(r: &NearbySearchResult) -> Vec<String> {
     let prefix = place_origin("");
     let mut ids: Vec<String> = r
         .places

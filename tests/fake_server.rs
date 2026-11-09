@@ -83,8 +83,18 @@ mod requests {
         let r =
             get(&fake, "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=d&bbox=0.00,0.00,0.01,0.01&text=x");
         assert_eq!((r.status, json_of(&r)["error"].as_str()), (400, Some("InvalidRequest")));
-        let r = get(&fake, "https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=d&bbox=0.001,0.00,0.01,0.01");
-        assert_eq!((r.status, json_of(&r)["error"].as_str()), (400, Some("InvalidRequest")));
+        // The server refuses a coordinate finer than 0.01 degrees (#60); the form the client never sends is a
+        // plain InvalidRequest.
+        for bbox in ["-122.4194,37.77,-122.41,37.78", "-122.42,37.77,-122.41,37.7801"] {
+            let url = format!("https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&bbox={bbox}");
+            let r = get(&FakeServer::new(), &url);
+            assert_eq!((r.status, json_of(&r)["error"].as_str()), (400, Some("BboxTooPrecise")), "{bbox}");
+        }
+        for bbox in ["-122.4,37.77,-122.41,37.78", "-122,37.77,-122.41,37.78"] {
+            let url = format!("https://places.atgeo.org/xrpc/org.atgeo.getTiles?dataset=overturemaps.org&bbox={bbox}");
+            let r = get(&FakeServer::new(), &url);
+            assert_eq!((r.status, json_of(&r)["error"].as_str()), (400, Some("InvalidRequest")), "{bbox}");
+        }
         assert!(bbox_pattern("-122.42,37.77,-122.41,37.78"));
         assert!(!bbox_pattern("-122.42,37.77,-122.41"));
         assert!(!bbox_pattern("1e2.00,0.00,0.00,0.00"));
@@ -145,5 +155,90 @@ mod requests {
                 "tilesets": [{ "slug": "overture-place", "collections": [{ "dataset": "overturemaps.org", "collection": "place" }] }],
             })
         );
+    }
+}
+
+// describe("fake server searchPlaces")
+mod search_places {
+    use super::*;
+
+    fn search(query: &str) -> (u16, Value) {
+        let records = vec![
+            record(place("a", "Starbucks", vec![point(37.772, -122.412)], json!({})), Some(5), None),
+            record(
+                place(
+                    "b",
+                    "McDonald's",
+                    vec![point(37.773, -122.413)],
+                    json!({ "variants": [{ "name": "Mickey D's" }] }),
+                ),
+                Some(9),
+                None,
+            ),
+        ];
+        let fake = build(records, Some("overture-place")).unwrap();
+        let r = get(&fake, &format!("https://places.atgeo.org/xrpc/org.atgeo.searchPlaces?{query}"));
+        (r.status, json_of(&r))
+    }
+
+    const BASE: &str = "dataset=overturemaps.org&q=star";
+
+    #[test]
+    fn answers_place_views_matching_each_word_as_a_prefix_of_a_word_of_one_name() {
+        let uris = |q: &str| -> Vec<String> {
+            search(q).1["places"].as_array().unwrap().iter().map(|p| p["uri"].as_str().unwrap().to_owned()).collect()
+        };
+        assert_eq!(uris(BASE), [place_origin("a")]);
+        for q in ["mcdonalds", "mickey", "D%27s%20mick"] {
+            assert_eq!(uris(&format!("dataset=overturemaps.org&q={q}")).len(), 1, "{q}");
+        }
+        assert!(uris("dataset=overturemaps.org&q=mcd%20starb").is_empty());
+        let view = &search(BASE).1["places"][0];
+        assert_eq!(view["importance"], 5);
+        assert_eq!(view["attribution"], json!([{ "dataset": "overturemaps.org", "collection": "place" }]));
+    }
+
+    #[test]
+    fn answers_400_keyword_required_to_a_keyword_with_no_long_enough_word() {
+        for q in ["a", "%ED%95%98", "%E0%A4%95%E0%A4%BE", "a%20b%27", "%20%20"] {
+            let (status, body) = search(&format!("dataset=overturemaps.org&q={q}"));
+            assert_eq!((status, body["error"].as_str()), (400, Some("KeywordRequired")), "{q}");
+        }
+    }
+
+    #[test]
+    fn answers_400_to_the_boxes_the_server_refuses() {
+        for (bbox, error) in [
+            ("-76.0,39,-75,40", "BboxTooPrecise"),
+            ("-76,39,-75,40.5", "BboxTooPrecise"),
+            ("1e1,39,20,40", "BboxTooPrecise"),
+            ("-76,39,-75", "InvalidBbox"),
+            ("a,39,-75,40", "InvalidBbox"),
+            ("-76,40,-75,40", "InvalidBbox"),
+            ("-75,39,-76,40", "InvalidBbox"),
+            ("10,39,10,40", "InvalidBbox"),
+            ("180,39,-180,40", "InvalidBbox"),
+            ("0,39,-1,40", "InvalidBbox"),
+            ("-181,39,-75,40", "InvalidBbox"),
+            ("-76,39,-75,91", "InvalidBbox"),
+        ] {
+            assert_eq!(search(&format!("{BASE}&bbox={bbox}")).1["error"], error, "{bbox}");
+        }
+    }
+
+    #[test]
+    fn accepts_the_boxes_the_server_accepts() {
+        for bbox in ["-76,39,-75,40", "76.,39,77,40", "170,39,-170,40", "-180,39,180,40"] {
+            assert_eq!(search(&format!("{BASE}&bbox={bbox}")).0, 200, "{bbox}");
+        }
+    }
+
+    #[test]
+    fn checks_the_precision_then_the_bbox_then_the_dataset_then_the_keyword() {
+        assert_eq!(search("dataset=nope&q=a&bbox=1.5,2,1,3").1["error"], "BboxTooPrecise");
+        assert_eq!(search("dataset=nope&q=a&bbox=2,2,1,3").1["error"], "InvalidBbox");
+        assert_eq!(search("dataset=nope&q=a").1["error"], "DatasetNotFound");
+        assert_eq!(search("dataset=overturemaps.org&collection=nope&q=a").1["error"], "CollectionNotFound");
+        assert_eq!(search("dataset=overturemaps.org&q=a").1["error"], "KeywordRequired");
     }
 }

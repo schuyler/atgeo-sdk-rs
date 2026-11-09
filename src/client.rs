@@ -5,18 +5,22 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::SystemTime;
 
 use futures_util::future::{join_all, try_join_all};
 
-use crate::engine::{Engine, ListStep, MAX_TILES_IN_FLIGHT, Slot, Step, TileStep};
+use crate::autocomplete::KeywordAutocomplete;
+use crate::engine::{Engine, ListStep, MAX_TILES_IN_FLIGHT, NearbyArgs, Slot, Step, TileStep, fallback};
 use crate::error::Error;
 use crate::transport::HttpTransport;
 #[cfg(feature = "reqwest")]
 use crate::transport::ReqwestTransport;
-use crate::types::{PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, Tileset};
+use crate::types::{
+    FallbackOptions, FallbackSearchResult, KeywordOptions, KeywordRegionMode, KeywordSearchResult, NearbyOptions,
+    NearbySearchResult, PlaceRecord, Region, ServiceDescription, Tileset,
+};
 
 /// A client for one atgeo server.
 ///
@@ -27,11 +31,11 @@ use crate::types::{PlaceRecord, Region, SearchOptions, SearchResult, ServiceDesc
 /// ```no_run
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() -> Result<(), atgeo::Error> {
-/// use atgeo::{AtgeoClient, Region, SearchOptions};
+/// use atgeo::{AtgeoClient, NearbyOptions, Region};
 ///
 /// let atgeo = AtgeoClient::new();
 /// let result = atgeo
-///     .search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new("overturemaps.org").text("Starbux"))
+///     .search_nearby(Region::circle(39.9526, -75.1652, 1000.0), NearbyOptions::new("overturemaps.org").text("Starbux"))
 ///     .await?;
 /// # Ok(())
 /// # }
@@ -108,9 +112,13 @@ impl<T: HttpTransport> AtgeoClient<T> {
     /// Fails with `Error::InvalidArgument` for an invalid region or a similarity sort without text, before
     /// any request, and with the getTiles call's error if a tile list cannot be had. A tile that fails to
     /// load does not fail the search: it is counted in `tiles.failed` and reported, with why, in
-    /// `tile_failures`, and `complete` is false.
-    pub async fn search_places(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
-        let mut plan = self.engine.plan(region, &options)?;
+    /// `tile_failures`, and `complete` is false. `disclosed` says what the server learned.
+    pub async fn search_nearby(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error> {
+        self.nearby(region, NearbyArgs::from(&options)).await
+    }
+
+    async fn nearby(&self, region: Region, args: NearbyArgs<'_>) -> Result<NearbySearchResult, Error> {
+        let mut plan = self.engine.plan(region, &args)?;
         let steps = std::mem::take(&mut plan.lists);
         // The first error returns at once and drops the other request (contract §14).
         let lists = try_join_all(steps.into_iter().map(|step| async move {
@@ -125,6 +133,7 @@ impl<T: HttpTransport> AtgeoClient<T> {
         // The reference's mapLimit: min(8, n) workers, each claiming the next index.
         let n = urls.len();
         let next = AtomicUsize::new(0);
+        let attempted = AtomicBool::new(false);
         let workers = (0..n.min(MAX_TILES_IN_FLIGHT)).map(|_| async {
             let mut done = Vec::new();
             loop {
@@ -132,17 +141,79 @@ impl<T: HttpTransport> AtgeoClient<T> {
                 if i >= n {
                     return done;
                 }
-                done.push((i, self.tile(&urls[i]).await));
+                done.push((i, self.tile(&urls[i], &attempted).await));
             }
         });
         let slots = Engine::in_url_order(join_all(workers).await.into_iter().flatten());
-        Ok(self.engine.assemble(plan, urls, overview, slots))
+        Ok(self.engine.assemble(plan, urls, overview, slots, attempted.into_inner()))
     }
 
-    async fn tile(&self, url: &str) -> Slot {
+    /// Asks the server for places whose names match the keyword's words (contract §16). Unlike every
+    /// other search, **this sends the keyword to the server**, and with a region, a box snapped outward to
+    /// whole degrees (a circle is not accepted); `disclosed` on the result says so. The server answers at
+    /// most 20 places, most notable first, which this returns in that order with no ranking, region filter
+    /// or dedupe of its own. Nothing is cached.
+    ///
+    /// The privacy trade is this. A nearby search tells the server only a coarse area (0.01°) and never
+    /// what was searched for; a keyword search tells it the words, and a region only as coarse as a
+    /// degree, if one is given. The server's design keeps no log of what it receives (garganorn's privacy
+    /// design), but an operator who chose to could record the keyword with the time and the address the
+    /// request came from. Whether that is acceptable is the app's decision; a nearby search is
+    /// [`search_nearby`](Self::search_nearby).
+    ///
+    /// Fails with `Error::InvalidArgument` for a malformed region, before any request. A keyword the server
+    /// cannot use (no word of two characters among its first twelve distinct words) is not an argument
+    /// error: it goes out and the server answers `Error::Atgeo` with code `KeywordRequired`. A keyword
+    /// over 256 bytes of UTF-8 is answered `InvalidRequest`.
+    pub async fn search_by_keyword(
+        &self,
+        keyword: &str,
+        options: KeywordOptions,
+    ) -> Result<KeywordSearchResult, Error> {
+        let url = self.engine.keyword_step(keyword, &options)?;
+        self.engine.accept_keyword(self.transport.get(&url).await, options.region.is_some())
+    }
+
+    /// A nearby search for the keyword on the device, and, only if that finds no solid hit, a keyword
+    /// request (contract §18). A hit whose name matches the keyword word for word (match tier 1, whatever its
+    /// score) is solid. When it is not, and the keyword could be answered, **the keyword goes to the server**
+    /// as for [`search_by_keyword`](Self::search_by_keyword), with the nearby region snapped to whole degrees
+    /// when `keyword_region` is [`Degree`](KeywordRegionMode::Degree) and without one for
+    /// [`None`](crate::KeywordRegionMode::None). The result's `disclosed` says which happened.
+    ///
+    /// The keyword hits come first, then the nearby hits the answer did not already hold.
+    ///
+    /// A failure after the nearby half, such as the keyword request failing, fails the call, and the nearby
+    /// results are lost; the keyword may have reached the server even though there is no result to say so.
+    /// A keyword the server refuses with `KeywordRequired` is not a failure: the nearby result stands.
+    pub async fn search_nearby_then_by_keyword(
+        &self,
+        region: Region,
+        options: FallbackOptions,
+    ) -> Result<FallbackSearchResult, Error> {
+        let nearby = self.nearby(region, NearbyArgs::from(&options)).await?;
+        let Some(url) = self.engine.fallback_step(&nearby, &region, &options) else {
+            return Ok(fallback(nearby));
+        };
+        let found = self
+            .engine
+            .accept_keyword(self.transport.get(&url).await, options.keyword_region == KeywordRegionMode::Degree);
+        Engine::finish_fallback(nearby, found, options.keyword_region)
+    }
+
+    /// An autocompleter for one text field (contract §19): its `search_by_keyword` sends **every keyword
+    /// that qualifies to the server as typed, prefixes included**, and a call supersedes the previous call on
+    /// the same autocompleter. The dataset needs no checking, and a malformed region fails here, with
+    /// `Error::InvalidArgument`.
+    pub fn autocomplete_by_keyword(&self, options: KeywordOptions) -> Result<KeywordAutocomplete<'_, T>, Error> {
+        KeywordAutocomplete::new(self, options)
+    }
+
+    async fn tile(&self, url: &str, attempted: &AtomicBool) -> Slot {
         match self.engine.tile_step(url) {
             TileStep::Done(slot) => slot,
             TileStep::Fetch(prepared) => {
+                attempted.store(true, Ordering::Relaxed);
                 // Let the other workers look up their URLs before this one can store a tile, as the reference's
                 // do: a transport that answers on its first poll would otherwise store, and evict, before the
                 // first wave's lookups, and change which tiles a tight budget keeps.

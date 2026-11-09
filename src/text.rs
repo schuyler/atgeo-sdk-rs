@@ -1,5 +1,7 @@
 //! Normalization, Jaro-Winkler and record scoring (contract §7).
 
+use std::collections::HashSet;
+
 use serde_json::{Map, Value};
 use unicode_normalization::UnicodeNormalization;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
@@ -156,9 +158,16 @@ impl Query {
         names(value).map(|n| self.score_name(&n)).fold(0.0, f64::max)
     }
 
+    /// Whether the query has text but no words once folded (`&`): every record is tier 1 for it, and
+    /// ranking keeps those at a score of 0.6 (contract §7).
+    pub(crate) fn wordless(&self) -> bool {
+        self.folded.is_empty()
+    }
+
     /// 1 if every query word begins a word of one single name, else 2 (contract §7); 1 for a query that folds
-    /// to no words. Call it for a record that scored at least 0.6. `str::starts_with` is a prefix in UTF-16
-    /// code units too: a UTF-8 byte prefix of a valid string is a code point prefix.
+    /// to no words. It is computed for every record when there is text, since it decides which threshold
+    /// applies. `str::starts_with` is a prefix in UTF-16 code units too: a UTF-8 byte prefix of a valid
+    /// string is a code point prefix.
     pub(crate) fn tier(&self, value: &Map<String, Value>) -> u8 {
         if self.folded.is_empty() {
             return 1;
@@ -169,6 +178,32 @@ impl Query {
         });
         if exact { 1 } else { 2 }
     }
+}
+
+/// Whether the server's keyword search would accept the keyword (contract §17): after `normalize`, folding,
+/// dropping spacing and enclosing marks (which `normalize` leaves), recomposing and deduplicating, one of its
+/// first 12 words has two code points. Not match tier 1's tokenization: that takes 12 words before folding
+/// and does not deduplicate.
+pub(crate) fn qualifies(keyword: &str) -> bool {
+    let normalized = normalize(keyword);
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut words: Vec<String> = Vec::new();
+    for word in normalized.split(' ').flat_map(fold) {
+        let word: String = word
+            .chars()
+            .filter(|c| !matches!(c.general_category(), GeneralCategory::SpacingMark | GeneralCategory::EnclosingMark))
+            .nfc()
+            .collect();
+        if word.is_empty() || !seen.insert(word.clone()) {
+            continue;
+        }
+        words.push(word);
+        if words.len() == MAX_QUERY_TOKENS {
+            break;
+        }
+    }
+    // Code points, not UTF-16 units and not bytes: `chars()` counts Unicode scalars.
+    words.iter().any(|w| w.chars().count() >= 2)
 }
 
 #[cfg(test)]
@@ -285,5 +320,61 @@ mod tests {
         let words: Vec<String> = (0..13).map(|i| format!("w{i}")).collect();
         let q = Query::new(&words.join(" ")).unwrap();
         assert_eq!(q.tokens.len(), 12);
+    }
+
+    // qualifying.test.ts
+    #[test]
+    fn qualifying_keywords_fixture() {
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/qualifying-keywords.json")).unwrap();
+        assert_eq!(cases.len(), 23);
+        let failures: Vec<String> = cases
+            .iter()
+            .filter_map(|c| {
+                let (name, keyword) = (c["name"].as_str().unwrap(), c["keyword"].as_str().unwrap());
+                let want = c["qualifies"].as_bool().unwrap();
+                (qualifies(keyword) != want).then(|| format!("{name}: qualifies({keyword:?}) is not {want}"))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn qualifying_counts_code_points_and_does_not_reuse_the_tier_tokenization() {
+        // Two code points, four UTF-16 units and eight bytes.
+        assert!(qualifies("\u{1F600}\u{1F601}"));
+        // One astral code point is one character, though two UTF-16 units.
+        assert!(!qualifies("\u{1F600}"));
+        // The first 12 distinct words: duplicates do not use a slot, so the 13th word is the 12th distinct.
+        let mut words: Vec<String> = vec!["a".to_string(); 11];
+        words.push("a".into());
+        words.push("bb".into());
+        assert!(qualifies(&words.join(" ")));
+        // Twelve distinct one-letter words, then a long one: past the cap.
+        let mut words: Vec<String> = ('a'..='l').map(String::from).collect();
+        words.push("long".into());
+        assert!(!qualifies(&words.join(" ")));
+        // A precomposed Hangul syllable is one character after NFC, though NFKD makes it two.
+        assert!(!qualifies("\u{D558}"));
+        // A consonant with a spacing vowel sign is one character once the sign is removed.
+        assert!(!qualifies("\u{0915}\u{093E}"));
+    }
+
+    // The fixture of lone surrogates is vendored and not run: a Rust string cannot hold one, and a body that
+    // has one reads it as U+FFFD (contract §7, §14; CONFORMANCE.md), so the case cannot reach `tier`. All that
+    // is checked is that the file is the one the contract describes, read the way a body is.
+    #[test]
+    fn the_lone_surrogate_fixture_is_vendored_and_not_run() {
+        let raw = include_str!("../tests/fixtures/match-tiers-lone-surrogates.json");
+        assert!(serde_json::from_str::<Value>(raw).is_err(), "serde_json cannot hold a lone surrogate");
+        let Value::Array(cases) = crate::wire::parse_body(raw.as_bytes()).unwrap() else { panic!() };
+        assert_eq!(cases.len(), 4);
+        assert!(raw.to_ascii_lowercase().contains("\\ud8") && !raw.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn a_query_with_no_words_once_folded_is_wordless() {
+        assert!(Query::new("&").unwrap().wordless());
+        assert!(!Query::new("a&b").unwrap().wordless());
     }
 }

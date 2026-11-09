@@ -187,6 +187,46 @@ pub(crate) fn place_view(body: &[u8]) -> Result<PlaceView, DecodingError> {
     }
 }
 
+/// One kept element of a `searchPlaces` answer (contract §1).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FoundPlace {
+    /// `value.origin` if that is a string, else the element's `uri` if that is a string, else `None`.
+    pub(crate) origin: Option<String>,
+    pub(crate) value: Arc<Map<String, Value>>,
+    pub(crate) importance: Option<i64>,
+    /// Empty unless the element's `attribution` is an array.
+    pub(crate) attribution: Vec<Attribution>,
+}
+
+/// A `searchPlaces` body: the elements of `places` that are objects with an object `value`, in served order,
+/// nothing deduplicated. A `DecodingError` unless the body is an object whose `places` is an array. `url` is
+/// not read.
+pub(crate) fn search_places(body: &[u8]) -> Result<Vec<FoundPlace>, DecodingError> {
+    let Value::Object(mut answer) = parse_body(body).map_err(DecodingError::json)? else {
+        return Err(DecodingError::shape("searchPlaces response has no places array"));
+    };
+    let Some(Value::Array(places)) = answer.remove("places") else {
+        return Err(DecodingError::shape("searchPlaces response has no places array"));
+    };
+    Ok(places
+        .into_iter()
+        .filter_map(|p| {
+            let Value::Object(mut p) = p else { return None };
+            let Some(Value::Object(value)) = p.remove("value") else { return None };
+            let origin = match (value.get("origin"), p.get("uri")) {
+                (Some(Value::String(o)), _) | (_, Some(Value::String(o))) => Some(o.clone()),
+                _ => None,
+            };
+            Some(FoundPlace {
+                origin,
+                importance: importance_of(p.get("importance")),
+                attribution: attributions(p.get("attribution")).unwrap_or_default(),
+                value: Arc::new(value),
+            })
+        })
+        .collect())
+}
+
 fn describe_body(body: &[u8], what: &str) -> Result<Map<String, Value>, DecodingError> {
     match parse_body(body).map_err(DecodingError::json)? {
         Value::Object(o) => Ok(o),
@@ -410,6 +450,24 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_search_places_body() {
+        let body = br#"{"places":[
+            {"value":{"origin":"o1","name":"a"},"uri":"u1","importance":2.9,"url":"x",
+             "attribution":[{"dataset":"d","collection":"c"},7]},
+            {"value":{"name":"b"},"uri":"u2","attribution":"x"},
+            {"value":{"origin":5,"name":"c"}},
+            {"value":null,"uri":"u4"}, {"uri":"u5"}, null, 3, "x", []
+        ]}"#;
+        let places = search_places(body).unwrap();
+        let got: Vec<_> = places.iter().map(|p| (p.origin.as_deref(), p.importance, p.attribution.len())).collect();
+        assert_eq!(got, [(Some("o1"), Some(2), 1), (Some("u2"), None, 0), (None, None, 0)]);
+        assert!(search_places(br#"{"places":[]}"#).unwrap().is_empty());
+        for body in [&b"{}"[..], b"[]", br#"{"places":{}}"#, b"null", b"not json"] {
+            assert!(search_places(body).is_err());
+        }
+    }
+
+    #[test]
     fn reads_describe_bodies_leniently() {
         let s = service_description(
             br#"{"did":5,"tilesets":[{"slug":"a","collections":[{"dataset":"d","collection":"c"},3]},7,{}],"x":1}"#,
@@ -608,6 +666,20 @@ mod tests {
                 o.insert("attribution".into(), attribution_to_json(&v.attribution));
                 Value::Object(o)
             }
+            "searchPlaces" => {
+                let places: Vec<Value> = search_places(&bytes)?
+                    .into_iter()
+                    .map(|p| {
+                        let mut o = Map::new();
+                        o.insert("origin".into(), p.origin.map_or(Value::Null, Value::String));
+                        o.insert("value".into(), Value::Object((*p.value).clone()));
+                        put(&mut o, "importance", p.importance);
+                        o.insert("attribution".into(), attribution_to_json(&p.attribution));
+                        Value::Object(o)
+                    })
+                    .collect();
+                json!({ "places": places })
+            }
             "describeService" => service_to_json(service_description(&bytes)?),
             "describeTileset" => tileset_to_json(tileset(&bytes)?),
             other => panic!("unknown reader {other}"),
@@ -617,11 +689,14 @@ mod tests {
     #[test]
     fn the_lenient_readers_agree_with_the_fixture() {
         let cases: Vec<Value> = serde_json::from_str(include_str!("../tests/fixtures/lenient-readers.json")).unwrap();
-        assert_eq!(cases.len(), 104);
+        assert_eq!(cases.len(), 124);
         let mut readers: Vec<&str> = cases.iter().map(|c| c["reader"].as_str().unwrap()).collect();
         readers.sort_unstable();
         readers.dedup();
-        assert_eq!(readers, ["describeService", "describeTileset", "getPlace", "getTiles", "tilePayload"]);
+        assert_eq!(
+            readers,
+            ["describeService", "describeTileset", "getPlace", "getTiles", "searchPlaces", "tilePayload"]
+        );
 
         let mut failures = Vec::new();
         for case in &cases {

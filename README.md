@@ -1,22 +1,22 @@
 # atgeo
 
-A Rust client for the atgeo gazetteer served by [garganorn](https://github.com/schuyler/garganorn), which searches places without telling the server what you searched for.
+A Rust client for the atgeo gazetteer served by [garganorn](https://github.com/schuyler/garganorn), which searches nearby places without telling the server what you searched for, and says so in the method name when a search might: only the methods whose names contain `keyword` send text to the server.
 
 It's a port of [@atgeo/client](https://github.com/schuyler/atgeo-sdk-js), the TypeScript reference, and behaves the same way: same requests on the wire, same filtering, scoring and ranking. There's an async client that runs on any executor, and a blocking one for code without an executor. Both have the same methods and return the same results.
 
 ## Synopsis
 
 ```rust,no_run
-use atgeo::{AtgeoClient, Region, SearchOptions};
+use atgeo::{AtgeoClient, Region, NearbyOptions};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), atgeo::Error> {
     let atgeo = AtgeoClient::new();
 
     let result = atgeo
-        .search_places(
+        .search_nearby(
             Region::circle(39.9526, -75.1652, 1000.0), // radius in meters
-            SearchOptions::new("overturemaps.org").text("Starbux"),
+            NearbyOptions::new("overturemaps.org").text("Starbux"),
         )
         .await?;
 
@@ -32,11 +32,11 @@ Misspellings are fine; matching is fuzzy (words that match exactly rank first), 
 The async example needs `tokio` (with its `macros` and `rt` features) in your own dependencies for `#[tokio::main]`; the crate itself doesn't depend on Tokio, though its default transport needs a Tokio runtime to run on. The blocking client, behind the `ureq` feature (below), is the same without the `.await`:
 
 ```rust,no_run
-use atgeo::{Region, SearchOptions, blocking::AtgeoClient};
+use atgeo::{Region, NearbyOptions, blocking::AtgeoClient};
 
 fn main() -> Result<(), atgeo::Error> {
     let atgeo = AtgeoClient::new();
-    let result = atgeo.search_places(Region::circle(39.9526, -75.1652, 1000.0), SearchOptions::new("overturemaps.org").text("Starbux"))?;
+    let result = atgeo.search_nearby(Region::circle(39.9526, -75.1652, 1000.0), NearbyOptions::new("overturemaps.org").text("Starbux"))?;
     println!("{} places", result.places.len());
     Ok(())
 }
@@ -84,9 +84,11 @@ A client is `Send + Sync` whenever its transport is. Make one per server and sha
 
 The async client's methods are `async`; the blocking client's are the same without it. All return `Result<_, atgeo::Error>`.
 
-### `search_places(region, options) -> SearchResult`
+### `search_nearby(region, options) -> NearbySearchResult`
 
-`SearchOptions::new(dataset)` and its setters. The dataset is the one required piece, and there's no default: `SearchOptions::new("overturemaps.org")`. It's a string, so a missing or non-string dataset (and a collection without one) won't compile. An empty string is sent as given, and the server answers for itself.
+The search that never sends your text. (The keyword methods, which may, are [below](#search_by_keyword).)
+
+`NearbyOptions::new(dataset)` and its setters. The dataset is the one required piece, and there's no default: `NearbyOptions::new("overturemaps.org")`. It's a string, so a missing or non-string dataset (and a collection without one) won't compile. An empty string is sent as given, and the server answers for itself.
 
 | Setter | Meaning |
 |---|---|
@@ -101,11 +103,11 @@ Region::circle(39.9526, -75.1652, 1000.0)          // lat, lon, radius in meters
 Region::bbox(-75.18, 39.94, -75.14, 39.96)          // west, south, east, north, in degrees
 ```
 
-A `Region` isn't checked when you build it; `search_places` rejects an invalid one before making any request.
+A `Region` isn't checked when you build it; `search_nearby` rejects an invalid one before making any request.
 
 Datasets and collections work like this:
 
-- With only a dataset, you search the whole dataset, every collection together. `SearchOptions::new("openstreetmap.org")` returns nodes, ways and relations in one list.
+- With only a dataset, you search the whole dataset, every collection together. `NearbyOptions::new("openstreetmap.org")` returns nodes, ways and relations in one list.
 - Add `.collection("way")` to get only ways.
 
 A collection-filtered search keeps only records whose `origin` starts with `urn:atgeo:{dataset}:{collection}:`. A record with no `origin` matches no collection filter, so such a search never returns one. A dataset-only search has no filter and returns those records too.
@@ -115,13 +117,14 @@ A bbox with `west > east` crosses the antimeridian. A place with a point locatio
 The result:
 
 ```rust,ignore
-pub struct SearchResult {
-    pub places: Vec<SearchHit>,
+pub struct NearbySearchResult {
+    pub places: Vec<NearbyHit>,
     pub complete: bool,        // false if any tile failed to load
     pub overview: bool,        // true if the server answered with its coarse overview; see below
     pub tiles: TileCounts,     // .fetched and .failed
     pub tile_failures: Vec<TileFailure>, // each failed tile, in URL order; empty when complete
     pub attribution: Vec<Attribution>,   // who to credit for the data in the tiles the search used
+    pub disclosed: Disclosure,           // what the server learned during this call; see Privacy
 }
 
 pub struct TileFailure {
@@ -131,7 +134,7 @@ pub struct TileFailure {
     pub error: Option<Arc<atgeo::Error>>, // what it failed with; None only when deserialized
 }
 
-pub struct SearchHit {
+pub struct NearbyHit {
     pub origin: Option<String>,  // the place's identity: place.origin, else the tile record's uri, else None
     pub collection: Option<CollectionKey>, // the collection its origin names, if the tile's attribution has it
     pub place: Place,            // the record value, exactly as served
@@ -141,7 +144,7 @@ pub struct SearchHit {
 }
 ```
 
-`Place` is `Arc<serde_json::Map<String, serde_json::Value>>`: the gazetteer's value untouched, every key as served, and nothing decoded into a Rust type. It's shared rather than copied, because the client keeps the latest search's tiles parsed and a hit points into them; `(*hit.place).clone()` gives you a copy of your own. `hit.name()` reads `name` when it's a string (else `None`), and `hit.location()` returns the point and box the client read from `locations`, in the lexicon's field names (`south`, `west`, `north`, `east`; `west > east` crosses the antimeridian), the same ones `distance` was measured to.
+`hit.via()` is `"tiles"`. `Place` is `Arc<serde_json::Map<String, serde_json::Value>>`: the gazetteer's value untouched, every key as served, and nothing decoded into a Rust type. It's shared rather than copied, because the client keeps the latest search's tiles parsed and a hit points into them; `(*hit.place).clone()` gives you a copy of your own. `hit.name()` reads `name` when it's a string (else `None`), and `hit.location()` returns the point and box the client read from `locations`, in the lexicon's field names (`south`, `west`, `north`, `east`; `west > east` crosses the antimeridian), the same ones `distance` was measured to.
 
 #### Attribution
 
@@ -166,7 +169,7 @@ You own what you're given. `Attribution` is plain owned data, so changing an ent
 
 The result types are `#[non_exhaustive]`, so fields can be added without a major release. The price is that you can't build one with a struct literal.
 
-When there's text, places scoring below 0.6 are dropped. The rest rank in two tiers, whatever the sort mode: a place with a name (its own or a variant) that has every word of the query as the start of one of its words (apostrophes ignored, other punctuation splitting words, so `mcdonalds` finds `McDonald's` and `st louis` finds `St. Louis`) comes before one that matches only fuzzily. Within a tier, the sort mode decides.
+With text, every place falls in one of two tiers, whatever the sort mode. Tier 1: a place with a name (its own or a variant) that has every word of the query as the start of one of its words (apostrophes ignored, other punctuation splitting words, so `mcdonalds` finds `McDonald's` and `st louis` finds `St. Louis`). It is kept whatever its score, because a word match is what you typed the start of, however short: `qu` scores only about 0.41 against `Bar & Grill at the Old Quarry`. Tier 2: a place that matches only fuzzily. It needs a score of at least 0.8 (a one- or two-edit typo scores above 0.82: `kostco` against `Costco` is 0.89), because below that a random string finds real names. A query whose words all fold away (`&`) has nothing to match word for word, so every place is tier 1 for it and 0.6 is the cutoff. Tier 1 comes before tier 2; within a tier, the sort mode decides.
 
 Sort modes:
 
@@ -188,6 +191,51 @@ With text, an overview answer keeps only the places that match every query word 
 
 A place can be stored in several tiles. The client keeps one hit per origin (or per `uri`, for a record with no origin); when the copies differ, the copy from the lowest tile URL wins. Garganorn's copies are byte-identical, so this only matters for other producers' tilesets. The [JS README](https://github.com/schuyler/atgeo-sdk-js#places-that-appear-in-more-than-one-tile) has the long version.
 
+### `search_by_keyword(keyword, options) -> KeywordSearchResult`
+
+**This sends the keyword to the server.** It asks the server's own search index (`org.atgeo.searchPlaces`) for places whose names match the keyword, so it can find a place that is not near you, or not in any tile you have. `KeywordOptions::new(dataset)` takes an optional `.collection(…)` and an optional `.region(KeywordRegion::new(west, south, east, north))`. A region is a box only, never a circle (a circle API invites the device's own position as its centre), and it goes out snapped outward to whole degrees.
+
+```rust,no_run
+# #[tokio::main(flavor = "current_thread")]
+# async fn main() -> Result<(), atgeo::Error> {
+use atgeo::{AtgeoClient, KeywordOptions, KeywordRegion};
+
+let atgeo = AtgeoClient::new();
+let found = atgeo
+    .search_by_keyword("Starbucks", KeywordOptions::new("overturemaps.org").region(KeywordRegion::new(-76.0, 39.0, -75.0, 40.0)))
+    .await?;
+for hit in &found.places {
+    println!("{} {:?}", hit.name().unwrap_or("-"), hit.origin);
+}
+assert!(found.disclosed.keyword);
+# Ok(())
+# }
+```
+
+A place matches when each word of the keyword begins a word of one of its names, ignoring case and accents; apostrophes drop and other punctuation splits words. The server returns at most 20, most notable first, and the client keeps its order: no ranking, no region filter and no dedupe of its own. A `KeywordHit` has `origin`, `collection`, `place` and `importance`, with `name()`, `location()` and `via()` (`"keyword"`), and no `distance` or `score`, since the server ranks by neither; compute a distance from `location()` if you need one. `result.attribution` is the union of the places' attribution, sorted as a search's is. Nothing is cached: each call is one request, and nothing from the answer enters a cache.
+
+A keyword the server cannot use (none of its first twelve distinct words, once case, accents and punctuation are gone, is two characters long) is not an argument error: it is sent, and the server answers `Error::Atgeo` with the code `KeywordRequired`. A keyword over 256 bytes of UTF-8 is answered `InvalidRequest`.
+
+**The trade.** A nearby search tells the server a 0.01° cell and never what you were looking for. A keyword search tells it the words, and, if you pass a region, a one-degree cell around the area. The server keeps no log of what it receives (garganorn's privacy design), but an operator who chose to could record the keyword together with the time and the address the request came from. Whether that is acceptable for a feature is your decision, and `disclosed` on every result says what a call sent.
+
+### `search_nearby_then_by_keyword(region, options) -> FallbackSearchResult`
+
+A nearby search for the keyword on the device, and **only if that finds nothing solid, a keyword request** (the trade above, and nothing else). `FallbackOptions::new(dataset, keyword, keyword_region)` takes the keyword and `KeywordRegionMode::None` or `KeywordRegionMode::Degree`, with no default, so what goes out with the keyword is your choice every time: `Degree` sends the nearby region as a box (a circle as its enclosing box) snapped to whole degrees, and `None` sends no region. `.collection(…)` and `.sort(…)` work as for a nearby search.
+
+A hit is solid when it is tier 1 (above), whatever its score. When one is, or when the keyword is one the server would refuse, no keyword request is made and you get the nearby result. Otherwise the result's `places` are the keyword hits in the server's order, then the nearby hits the answer did not already hold (a hit with no origin is never left out). Each is a `FallbackHit::Nearby(NearbyHit)` or `FallbackHit::Keyword(KeywordHit)`; `hit.via()` says which, and `origin()`, `name()`, `place()`, `location()`, `importance()` and `collection()` read either. `complete`, `overview`, `tiles` and `tile_failures` are the nearby search's, and `attribution` is the union of both halves. A nearby search that had failed tiles and no tier-1 hit still falls back, though the missing tiles might have held one.
+
+`disclosed.keyword` is true exactly when the keyword request went out. `disclosed.region` is the finest region sent during the call: `0.01` if the nearby search sent anything, else `1` for `Degree`, else `None`. A cold `Degree` call reports `0.01`, though the keyword travelled with a one-degree box.
+
+A keyword the server refuses with `KeywordRequired`, though the client's check let it through (compatibility characters such as `ﬁ`), is no failure: you get the nearby result, with `disclosed.keyword` true because the keyword went out. Any other failure of the keyword request fails the call, and the nearby results are lost with it. **The keyword may have reached the server even then**, and the error carries no `disclosed`.
+
+### `autocomplete_by_keyword(options) -> KeywordAutocomplete` (async client only)
+
+For a search box that shows places as you type. Make one autocompleter per text field; its `search_by_keyword(keyword)` is [`search_by_keyword`](#search_by_keyword) with the options fixed.
+
+**Every keyword that qualifies is sent to the server as typed, prefixes included**: typing `Starbucks` sends `St`, `Sta`, `Star` and so on, a request each, and the server sees all of them. A keyword the server would refuse makes no request and resolves empty with `disclosed.keyword` false. The server keeps no log of what it receives, and an operator who chose to could record it. Debouncing reduces how many prefixes go out, and is your choice; the autocompleter does not debounce.
+
+Each call supersedes the previous call on the same autocompleter, at the moment you call it, and the superseded call resolves to `Error::Superseded`: **ignore it**; it is not a failure and nothing was cancelled on your side. Dropping a call's future cancels it and its request, as everywhere. A keyword the server refuses with `KeywordRequired` resolves empty with `disclosed.keyword` true (and `region` `1` if the autocompleter has one). Two autocompleters on one client do not supersede each other. There is no autocompleter in the blocking client: a blocking call cannot be cancelled in flight.
+
 ### `get_place(origin) -> PlaceRecord`
 
 Returns a `PlaceRecord` with `origin`, `place`, `importance` and `attribution`, as in a hit, and the same `name()` and `location()`. `attribution` is a list of `Attribution`, in the order the source served it, duplicates included and unsorted: from the cached tile that held the place (the lowest URL, if several did), or from the server's answer. It's empty if there is none. Pass the `origin` of a hit. If a cached tile holds the place, no request is made; otherwise the client asks the server (`org.atgeo.getPlace`) directly.
@@ -207,9 +255,10 @@ Every field of the describe types is an `Option` except the lists the lexicon re
 `atgeo::Error` is one enum:
 
 - `Error::Atgeo(AtgeoError)`: the server answered with a non-2xx status. `AtgeoError` has a `code`, a `message` and the HTTP `status`, which tells a request the server refused (4xx) from one it failed to answer (5xx) without matching on codes. The code and message come from the server's JSON error body; if there isn't one, the code is `HttpError`. Apart from `HttpError`, every code comes from the server: for example `PlaceNotFound`, `TilesetNotFound`, `DatasetNotFound`, `CollectionNotFound`, `BboxTooLarge`, or `InvalidRequest`. The list is open, so report codes rather than matching on them.
-- `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `value` object in a `getPlace` answer, a describe body that isn't an object).
+- `Error::Decoding(DecodingError)`: a 2xx body that isn't JSON, or has nothing usable in it (no `tiles` list, no `value` object in a `getPlace` answer, no `places` array in a `searchPlaces` answer, a describe body that isn't an object).
 - `Error::Transport(BoxError)`: no response arrived. It holds the transport's own error, so `downcast_ref::<reqwest::Error>()` reaches it.
-- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `south > north`, a negative radius), `Similarity` without text, or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
+- `Error::Superseded`: an autocompleter call that a later call on the same autocompleter replaced. Ignore it.
+- `Error::InvalidArgument(ArgumentError)`: an invalid region (non-finite or out-of-range coordinates, `south > north`, a negative radius), `Similarity` without text (or, for the fallback, a keyword that normalizes to nothing), or a server that isn't an http or https URL, or that carries credentials (`user:password@`). All of these are found before any request.
 
 An error's `Display` says what went wrong at its own level and leaves the cause to `source()`, as the standard library's errors do: a transport failure displays as `transport error`, and a body that isn't JSON as `response is not JSON`, with the transport's or the parser's error as the source. To log the whole story, walk `source()`, or print it with anyhow's `{:#}`.
 
@@ -258,9 +307,9 @@ The blocking client runs a search on scoped threads, eight at most for the tiles
 
 ## Privacy
 
-Your search text never leaves the device. Neither does your precise location.
+Your search text never leaves the device through `search_nearby`. Neither does your precise location, through any method. Text leaves the device only through the methods whose names contain `keyword`, which [say so above](#search_by_keyword), and every result's `disclosed` says what its call sent: `keyword` is true exactly when a `searchPlaces` request went out, and `region` is the grid of the finest region sent (`0.01`, `1`, or `None`; a call answered entirely from cache sends nothing and reports `None`, though an earlier call told the server about the area).
 
-To search, the client asks the server which tiles cover an area, downloads those tiles, and does the matching, filtering, and ranking locally. The only location a search sends is a bounding box (two across the antimeridian), snapped outward to a 0.01 degree grid (roughly 1 km of latitude) before it goes out; alongside it go the search's dataset and, if it has one, its collection. Your exact region is used only on the device, to filter and to compute distances.
+To search nearby, the client asks the server which tiles cover an area, downloads those tiles, and does the matching, filtering, and ranking locally. The only location a search sends is a bounding box (two across the antimeridian), snapped outward to a 0.01 degree grid (roughly 1 km of latitude) before it goes out; alongside it go the search's dataset and, if it has one, its collection. Your exact region is used only on the device, to filter and to compute distances.
 
 What does go on the wire:
 
@@ -268,6 +317,7 @@ What does go on the wire:
 - Requests for the tile URLs the server returned, as served (with only the percent-encoding a browser would add; see `CONFORMANCE.md`), minus any already in the cache. So the server can tell which of those tiles this client fetched before (that you searched near here recently) but nothing finer than the tiles themselves.
 - `describeService` and `describeTileset`, only if you call them.
 - `get_place` on a cache miss sends the origin of the place you asked for.
+- The keyword methods send `searchPlaces` with the dataset, the collection if given, the keyword exactly as passed, and, when a region goes with it, a box of four whole numbers. Never the precise coordinates: for `[-122.4194155, 37.7749295, -122.4094155, 37.7849295]` the box is `-123,37,-122,38`. The nearby half of `search_nearby_then_by_keyword` is bound by everything above, so the keyword is in no request but that one.
 
 The server also sees your IP address and whatever headers your transport sends. Both default transports send `Accept: application/json`, `Accept-Encoding: gzip` and `User-Agent: atgeo-client-rust`, the same everywhere: no version, no `Accept-Language`, no `Referer`. A transport you supply sends whatever its stack does. Snapping hides where in a ~1 km cell you are; it doesn't hide the cell.
 
@@ -285,7 +335,7 @@ There is no persistence; a new client starts cold. Neither default transport has
 cargo test --all-features
 ```
 
-`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization, Jaro-Winkler, match tier and lenient-reader fixtures and the contract's worked tables. `tests/attribution.rs` runs the attribution scenarios, with a fresh client each, and again with the tiles arriving in reverse URL order. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
+`tests/fixtures/` holds the reference client's language-neutral fixtures and lexicons, vendored at the atgeo-sdk-js commit named in `tests/fixtures/SOURCE`. The unit tests in `src/` run the normalization, Jaro-Winkler, match tier, qualifying-keyword and lenient-reader fixtures and the contract's worked tables. `tests/keyword*.rs`, `tests/autocomplete.rs` and `tests/disclosed.rs` cover the keyword methods, with the keyword fallback and keyword region fixtures, and `tests/keyword.rs` and the privacy tests check what each sends against a fake that applies the server's own rules (`KeywordRequired`, `InvalidBbox`, `BboxTooPrecise`). `tests/attribution.rs` runs the attribution scenarios, with a fresh client each, and again with the tiles arriving in reverse URL order. The tests in `tests/` port the reference's tests against a fake server that checks its own traffic, running nearly every one against both clients; the few whose results depend on the order the blocking client's threads finish in run against the async client only. `tests/transports.rs` runs the two real transports against a loopback server.
 
 `CONFORMANCE.md` lists where this port differs from the reference at the edges the [port contract](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/port-contract.md) leaves open, mostly in how malformed JSON and odd URLs are handled. None of it comes up with a garganorn server. [`rust-sdk-spec.md`](https://github.com/schuyler/atgeo-sdk-js/blob/main/docs/rust-sdk-spec.md) in atgeo-sdk-js is the design this port was built to, and `DECISIONS.md` records where the build departed from it.
 

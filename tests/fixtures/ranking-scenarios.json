@@ -1549,8 +1549,8 @@
     }
   },
   {
-    "name": "tier-one-below-threshold-dropped",
-    "description": "A tier-1 record still has to clear the 0.6 threshold: \"x.y\" folds to tokens x and y, which prefix \"Yellow Xylophone Workshop\", but its score is about 0.54, so it is dropped.",
+    "name": "word-match-below-similarity-kept",
+    "description": "A word match is kept whatever its similarity score (#57): \"x.y\" folds to tokens x and y, which start words of \"Yellow Xylophone Workshop\", so it is kept though it scores about 0.54.",
     "region": {
       "lat": 37.7598,
       "lon": -122.4194,
@@ -1577,9 +1577,195 @@
       }
     ],
     "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:yellow-xylophone"
+          ]
+        }
+      ],
+      "absent": []
+    }
+  },
+  {
+    "name": "fuzzy-match-needs-0.8",
+    "description": "A fuzzy-only match must score at least 0.8 (#53): for \"ferry\", \"Feral Cafe\" (about 0.78) and \"Fairy Tale Toys\" (about 0.70) are dropped, while \"San Francisco Ferry Building\" (about 0.79) is a word match and is kept.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "ferry",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:ferry-building",
+          "name": "San Francisco Ferry Building",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 10
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:feral-cafe",
+          "name": "Feral Cafe",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760500",
+              "longitude": "-122.419000"
+            }
+          ]
+        },
+        "importance": 90
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:fairy-tale-toys",
+          "name": "Fairy Tale Toys",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760000",
+              "longitude": "-122.419500"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:ferry-building"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:feral-cafe",
+        "urn:atgeo:overturemaps.org:place:fairy-tale-toys"
+      ]
+    }
+  },
+  {
+    "name": "gibberish-matches-nothing",
+    "description": "A random string finds nothing (#53): \"xqzjvkwpfhgy\" scores about 0.64 against \"Qwizify\" and 0.63 against \"Jv Skin & Beauty\", which cleared the old 0.6 threshold, but neither is a word match or reaches 0.8.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "xqzjvkwpfhgy",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:qwizify",
+          "name": "Qwizify",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:jv-skin",
+          "name": "Jv Skin & Beauty",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760500",
+              "longitude": "-122.419000"
+            }
+          ]
+        },
+        "importance": 20
+      }
+    ],
+    "expect": {
       "top": [],
       "absent": [
-        "urn:atgeo:overturemaps.org:place:yellow-xylophone"
+        "urn:atgeo:overturemaps.org:place:qwizify",
+        "urn:atgeo:overturemaps.org:place:jv-skin"
+      ]
+    }
+  },
+  {
+    "name": "wordless-query-keeps-threshold",
+    "description": "A query whose words all fold away has no tokens, so every record is a word match; such a query still needs a score of 0.6. For \"&\", \"&pizza\" (about 0.75) is kept and \"Home Depot\" (0) is dropped.",
+    "region": {
+      "lat": 37.7598,
+      "lon": -122.4194,
+      "radius": 1000
+    },
+    "dataset": "overturemaps.org",
+    "collection": "place",
+    "text": "&",
+    "records": [
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:andpizza",
+          "name": "&pizza",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.761000",
+              "longitude": "-122.418500"
+            }
+          ]
+        },
+        "importance": 20
+      },
+      {
+        "value": {
+          "$type": "org.atgeo.place",
+          "origin": "urn:atgeo:overturemaps.org:place:home-depot",
+          "name": "Home Depot",
+          "locations": [
+            {
+              "$type": "community.lexicon.location.geo",
+              "latitude": "37.760500",
+              "longitude": "-122.419000"
+            }
+          ]
+        },
+        "importance": 90
+      }
+    ],
+    "expect": {
+      "top": [
+        {
+          "k": 1,
+          "origins": [
+            "urn:atgeo:overturemaps.org:place:andpizza"
+          ]
+        }
+      ],
+      "absent": [
+        "urn:atgeo:overturemaps.org:place:home-depot"
       ]
     }
   }

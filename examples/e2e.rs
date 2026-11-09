@@ -9,7 +9,8 @@ use std::env;
 use std::process::ExitCode;
 
 use atgeo::{
-    CollectionRef, Error, PlaceRecord, Region, SearchOptions, SearchResult, ServiceDescription, SortMode, Tileset,
+    CollectionRef, Error, FallbackOptions, FallbackSearchResult, KeywordOptions, KeywordRegion, KeywordRegionMode,
+    KeywordSearchResult, NearbyOptions, NearbySearchResult, PlaceRecord, Region, ServiceDescription, SortMode, Tileset,
 };
 
 struct Config {
@@ -20,11 +21,19 @@ struct Config {
     radius: f64,
 }
 
-/// The four calls, so that one run of the steps drives either client.
+/// The calls, so that one run of the steps drives either client.
 trait Calls {
     fn describe_service(&self) -> Result<ServiceDescription, Error>;
     fn describe_tileset(&self, slug: &str) -> Result<Tileset, Error>;
-    fn search(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error>;
+    fn search(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error>;
+    fn keyword(&self, keyword: &str, options: KeywordOptions) -> Result<KeywordSearchResult, Error>;
+    fn fallback(&self, region: Region, options: FallbackOptions) -> Result<FallbackSearchResult, Error>;
+    /// One autocompleter, a call per keyword in turn; `None` for the blocking client, which has none.
+    fn autocomplete(
+        &self,
+        options: KeywordOptions,
+        keywords: &[&str],
+    ) -> Option<Result<Vec<KeywordSearchResult>, Error>>;
     fn get_place(&self, origin: &str) -> Result<PlaceRecord, Error>;
 }
 
@@ -37,8 +46,24 @@ impl Calls for Async {
     fn describe_tileset(&self, slug: &str) -> Result<Tileset, Error> {
         self.1.block_on(self.0.describe_tileset(slug))
     }
-    fn search(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
-        self.1.block_on(self.0.search_places(region, options))
+    fn search(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error> {
+        self.1.block_on(self.0.search_nearby(region, options))
+    }
+    fn keyword(&self, keyword: &str, options: KeywordOptions) -> Result<KeywordSearchResult, Error> {
+        self.1.block_on(self.0.search_by_keyword(keyword, options))
+    }
+    fn fallback(&self, region: Region, options: FallbackOptions) -> Result<FallbackSearchResult, Error> {
+        self.1.block_on(self.0.search_nearby_then_by_keyword(region, options))
+    }
+    fn autocomplete(
+        &self,
+        options: KeywordOptions,
+        keywords: &[&str],
+    ) -> Option<Result<Vec<KeywordSearchResult>, Error>> {
+        Some((|| {
+            let typing = self.0.autocomplete_by_keyword(options)?;
+            keywords.iter().map(|k| self.1.block_on(typing.search_by_keyword(k))).collect()
+        })())
     }
     fn get_place(&self, origin: &str) -> Result<PlaceRecord, Error> {
         self.1.block_on(self.0.get_place(origin))
@@ -54,8 +79,17 @@ impl Calls for Blocking {
     fn describe_tileset(&self, slug: &str) -> Result<Tileset, Error> {
         self.0.describe_tileset(slug)
     }
-    fn search(&self, region: Region, options: SearchOptions) -> Result<SearchResult, Error> {
-        self.0.search_places(region, options)
+    fn search(&self, region: Region, options: NearbyOptions) -> Result<NearbySearchResult, Error> {
+        self.0.search_nearby(region, options)
+    }
+    fn keyword(&self, keyword: &str, options: KeywordOptions) -> Result<KeywordSearchResult, Error> {
+        self.0.search_by_keyword(keyword, options)
+    }
+    fn fallback(&self, region: Region, options: FallbackOptions) -> Result<FallbackSearchResult, Error> {
+        self.0.search_nearby_then_by_keyword(region, options)
+    }
+    fn autocomplete(&self, _: KeywordOptions, _: &[&str]) -> Option<Result<Vec<KeywordSearchResult>, Error>> {
+        None
     }
     fn get_place(&self, origin: &str) -> Result<PlaceRecord, Error> {
         self.0.get_place(origin)
@@ -102,7 +136,7 @@ fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result
     log("describeTileset", format!("{slug}, {} collection(s)", tileset.collections.len()));
 
     let options = || {
-        let o = SearchOptions::new(c.dataset.clone());
+        let o = NearbyOptions::new(c.dataset.clone());
         match &c.collection {
             Some(col) => o.collection(col.clone()),
             None => o,
@@ -116,7 +150,7 @@ fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result
         distances.iter().all(|d| *d <= c.radius) && distances.windows(2).all(|w| w[1] >= w[0]),
         "not distance-ordered within radius",
     )?;
-    log("searchPlaces (no text)", format!("{} places from {} tile(s)", nearby.places.len(), nearby.tiles.fetched));
+    log("searchNearby (no text)", format!("{} places from {} tile(s)", nearby.places.len(), nearby.tiles.fetched));
 
     let named = nearby.places.iter().find(|h| h.origin.is_some() && h.name().is_some_and(|n| !n.is_empty()));
     let named = named.ok_or("no named place in region")?;
@@ -128,9 +162,70 @@ fn run(label: &str, c: &Config, client: &dyn Calls, fresh: &dyn Calls) -> Result
     )?;
     check(matched.places[0].score.is_some_and(|s| s > 0.0), "top text hit has no score")?;
     log(
-        "searchPlaces (text)",
+        "searchNearby (text)",
         format!("\"{name}\" -> top hit {}, {} places", matched.places[0].name().unwrap_or("?"), matched.places.len()),
     );
+
+    let keyword_options = || {
+        let o = KeywordOptions::new(c.dataset.clone());
+        match &c.collection {
+            Some(col) => o.collection(col.clone()),
+            None => o,
+        }
+    };
+    let point = named.location().point.ok_or("named place has no point")?;
+    let cell = KeywordRegion::new(point.lon, point.lat, point.lon, point.lat);
+    let keyword = client.keyword(&name, keyword_options().region(cell)).map_err(fail)?;
+    check(!keyword.places.is_empty(), "keyword search found nothing in the named place's degree")?;
+    check(keyword.places.iter().all(|h| h.via() == "keyword"), "keyword hits are not marked via keyword")?;
+    check((keyword.disclosed.keyword, keyword.disclosed.region) == (true, Some(1.0)), "keyword disclosed")?;
+    log(
+        "searchByKeyword",
+        format!(
+            "\"{name}\" in a 1 degree cell -> {} places, top hit {}",
+            keyword.places.len(),
+            keyword.places[0].name().unwrap_or("?")
+        ),
+    );
+
+    let fallback_options = |keyword: &str, mode| {
+        let o = FallbackOptions::new(c.dataset.clone(), keyword, mode);
+        match &c.collection {
+            Some(col) => o.collection(col.clone()),
+            None => o,
+        }
+    };
+    let solid = client.fallback(c.region, fallback_options(&name, KeywordRegionMode::Degree)).map_err(fail)?;
+    check(
+        solid.places.iter().any(|h| h.origin() == named.origin.as_deref()),
+        "named place missing from the combined search",
+    )?;
+    check(!solid.disclosed.keyword, "the combined search sent a keyword it had a solid hit for")?;
+    log(
+        "searchNearbyThenByKeyword (nearby hit)",
+        format!("{} places, keyword sent: {}", solid.places.len(), solid.disclosed.keyword),
+    );
+    let fallback = client.fallback(c.region, fallback_options("zzzzqqqq", KeywordRegionMode::None)).map_err(fail)?;
+    check(fallback.disclosed.keyword, "the fallback did not send its keyword")?;
+    log(
+        "searchNearbyThenByKeyword (fallback)",
+        format!("{} places, keyword sent: {}", fallback.places.len(), fallback.disclosed.keyword),
+    );
+
+    // A prefix of the name's first word of two or more characters, so it qualifies and matches the named place.
+    let word = name.split(|ch: char| ch.is_whitespace() || ch.is_ascii_punctuation()).find(|w| w.chars().count() >= 2);
+    let prefix: String = word.ok_or("the named place has no word of two characters")?.chars().take(3).collect();
+    let first_char: String = name.chars().take(1).collect();
+    if let Some(done) = client.autocomplete(keyword_options(), &[&first_char, &prefix]) {
+        let done = done.map_err(fail)?;
+        check(
+            (done[0].disclosed.keyword, done[0].disclosed.region) == (false, None),
+            "a one-character prefix was sent",
+        )?;
+        check((done[1].disclosed.keyword, done[1].disclosed.region) == (true, None), "the prefix was not sent")?;
+        check(!done[1].places.is_empty(), "keyword search with no region found nothing")?;
+        log("autocompleteByKeyword", format!("\"{prefix}\" -> {} places, one character skipped", done[1].places.len()));
+    }
 
     let origin = named.origin.clone().unwrap();
     let record = fresh.get_place(&origin).map_err(fail)?;

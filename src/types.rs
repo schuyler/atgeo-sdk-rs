@@ -52,48 +52,49 @@ pub enum SortMode {
     Similarity,
 }
 
-/// What to search for, besides the region.
+/// What to search for, besides the region, for [`search_nearby`](crate::AtgeoClient::search_nearby).
 ///
 /// A search needs a dataset (contract §4.1), so there is no way to build the options without one: `new`
 /// takes it, and there is no `Default`. A missing dataset, and a collection named without one, are
 /// compile errors, and so is a dataset that is not a string.
 ///
 /// ```
-/// # use atgeo::{SearchOptions, SortMode};
-/// let options = SearchOptions::new("overturemaps.org").text("Starbux").sort(SortMode::Distance);
+/// # use atgeo::{NearbyOptions, SortMode};
+/// let options = NearbyOptions::new("overturemaps.org").text("Starbux").sort(SortMode::Distance);
 /// ```
 ///
 /// ```compile_fail
-/// # use atgeo::SearchOptions;
-/// let options = SearchOptions::new(); // the dataset is required
+/// # use atgeo::NearbyOptions;
+/// let options = NearbyOptions::new(); // the dataset is required
 /// ```
 ///
 /// ```compile_fail
-/// # use atgeo::SearchOptions;
-/// let options = SearchOptions::default(); // and has no default
+/// # use atgeo::NearbyOptions;
+/// let options = NearbyOptions::default(); // and has no default
 /// ```
 ///
 /// ```compile_fail
-/// # use atgeo::SearchOptions;
-/// let options = SearchOptions::new(5); // and is a string
+/// # use atgeo::NearbyOptions;
+/// let options = NearbyOptions::new(5); // and is a string
 /// ```
 #[derive(Clone, Debug)]
-pub struct SearchOptions {
+pub struct NearbyOptions {
     pub(crate) dataset: String,
     pub(crate) text: Option<String>,
     pub(crate) collection: Option<String>,
     pub(crate) sort: SortMode,
 }
 
-impl SearchOptions {
+impl NearbyOptions {
     /// Options for a search of `dataset`, such as `overturemaps.org` or `openstreetmap.org`: no text, no
     /// collection (every collection of the dataset together), fused order. The dataset is required and has
     /// no default. An empty string is sent as given, and the server answers for itself.
     pub fn new(dataset: impl Into<String>) -> Self {
-        SearchOptions { dataset: dataset.into(), text: None, collection: None, sort: SortMode::default() }
+        NearbyOptions { dataset: dataset.into(), text: None, collection: None, sort: SortMode::default() }
     }
 
-    /// Search text, matched fuzzily against each place's names. It never leaves the device.
+    /// Search text, matched fuzzily against each place's names. It never leaves the device: only the
+    /// methods whose names contain `keyword` send text to the server.
     pub fn text(mut self, text: impl Into<String>) -> Self {
         self.text = Some(text.into());
         self
@@ -112,7 +113,7 @@ impl SearchOptions {
     }
 }
 
-/// What a search found.
+/// What a nearby search found.
 ///
 /// It is `Send` and `Sync`, but not `UnwindSafe` or `RefUnwindSafe`: a [`TileFailure`]'s error can hold a
 /// transport's boxed error, which promises neither. Wrap it in `std::panic::AssertUnwindSafe` to move it
@@ -120,8 +121,8 @@ impl SearchOptions {
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SearchResult {
-    pub places: Vec<SearchHit>,
+pub struct NearbySearchResult {
+    pub places: Vec<NearbyHit>,
     /// False if any tile failed to load, so that `places` may be missing some; `tile_failures` says which
     /// and why.
     pub complete: bool,
@@ -139,6 +140,32 @@ pub struct SearchResult {
     /// tile URL's first, sorted by dataset and then collection. Always a list. The app's own copy.
     #[cfg_attr(feature = "serde", serde(default))]
     pub attribution: Vec<Attribution>,
+    /// What the server learned during this call (contract §4.11): never the keyword, and the 0.01° grid
+    /// unless the call was answered entirely from cache.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub disclosed: Disclosure,
+}
+
+/// What the server learned during one call (contract §4.11).
+///
+/// It is about the call, not about the area: a warm search that reuses tiles an earlier search fetched
+/// reports `region: None`, though the earlier call told the server about the area. A call that fails
+/// returns no result and so reports nothing.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Disclosure {
+    /// The search text went to the server. True exactly when a `searchPlaces` request was made.
+    pub keyword: bool,
+    /// The grid, in degrees, of the finest region sent during the call: `0.01` (the tiles of a nearby
+    /// search), `1` (a keyword search's region, snapped to whole degrees), or `None` if none was sent.
+    pub region: Option<f64>,
+}
+
+impl Disclosure {
+    pub(crate) fn new(keyword: bool, region: Option<f64>) -> Self {
+        Disclosure { keyword, region }
+    }
 }
 
 /// The collection a hit belongs to (contract §8): the `dataset` and `collection` of the attribution entry
@@ -251,11 +278,11 @@ pub struct TileCounts {
     pub failed: usize,
 }
 
-/// One place a search found.
+/// One place a nearby search found.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SearchHit {
+pub struct NearbyHit {
     /// The place's identity: its `origin`, else the tile record's `uri`, else `None`.
     pub origin: Option<String>,
     /// The collection the hit belongs to, matched against its tile's attribution (contract §8); `None`
@@ -271,7 +298,12 @@ pub struct SearchHit {
     pub score: Option<f64>,
 }
 
-impl SearchHit {
+impl NearbyHit {
+    /// Where the hit came from: always `"tiles"`.
+    pub const fn via(&self) -> &'static str {
+        VIA_TILES
+    }
+
     /// The place's `name`, when that is a string.
     pub fn name(&self) -> Option<&str> {
         name_of(&self.place)
@@ -281,6 +313,265 @@ impl SearchHit {
     /// measured to.
     pub fn location(&self) -> PlaceLocation {
         locations::locate(&self.place).public()
+    }
+}
+
+const VIA_TILES: &str = "tiles";
+const VIA_KEYWORD: &str = "keyword";
+
+/// The options of a keyword search: a dataset, and optionally a collection and a region.
+///
+/// Every method that takes them sends the keyword to the server (contract §16): see
+/// [`search_by_keyword`](crate::AtgeoClient::search_by_keyword).
+///
+/// ```
+/// # use atgeo::{KeywordOptions, KeywordRegion};
+/// let options = KeywordOptions::new("overturemaps.org")
+///     .collection("place")
+///     .region(KeywordRegion::new(-123.0, 37.0, -122.0, 38.0));
+/// ```
+#[derive(Clone, Debug)]
+pub struct KeywordOptions {
+    pub(crate) dataset: String,
+    pub(crate) collection: Option<String>,
+    pub(crate) region: Option<KeywordRegion>,
+}
+
+impl KeywordOptions {
+    /// Options for a keyword search of `dataset`, with no collection and no region. The dataset is required
+    /// and has no default.
+    pub fn new(dataset: impl Into<String>) -> Self {
+        KeywordOptions { dataset: dataset.into(), collection: None, region: None }
+    }
+
+    /// One collection of the dataset, such as `way`.
+    pub fn collection(mut self, collection: impl Into<String>) -> Self {
+        self.collection = Some(collection.into());
+        self
+    }
+
+    /// Only places in or meeting this box. It goes to the server snapped outward to whole degrees.
+    pub fn region(mut self, region: KeywordRegion) -> Self {
+        self.region = Some(region);
+        self
+    }
+}
+
+/// A bounding box in degrees, for a keyword search: a box only, never a circle, because a circle API invites
+/// the device's own position as its centre. It is sent snapped outward to whole degrees (contract §16).
+///
+/// Like [`Region`], it is not validated on construction: a search with a malformed one fails with
+/// `ArgumentError::InvalidRegion` before any request.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KeywordRegion {
+    pub west: f64,
+    pub south: f64,
+    pub east: f64,
+    pub north: f64,
+}
+
+impl KeywordRegion {
+    /// A bounding box in degrees, in the order of the `getTiles` bbox string. `west > east` crosses the
+    /// antimeridian.
+    pub const fn new(west: f64, south: f64, east: f64, north: f64) -> Self {
+        KeywordRegion { west, south, east, north }
+    }
+
+    pub(crate) const fn as_region(&self) -> Region {
+        Region::Bbox { west: self.west, south: self.south, east: self.east, north: self.north }
+    }
+}
+
+/// Whether [`search_nearby_then_by_keyword`](crate::AtgeoClient::search_nearby_then_by_keyword)'s keyword
+/// request carries the nearby region, snapped to whole degrees.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+pub enum KeywordRegionMode {
+    /// The keyword request carries no region.
+    None,
+    /// The keyword request carries the nearby region as a box (a circle as its enclosing box), snapped
+    /// outward to whole degrees.
+    Degree,
+}
+
+/// The options of [`search_nearby_then_by_keyword`](crate::AtgeoClient::search_nearby_then_by_keyword).
+///
+/// The keyword and `keyword_region` are required: the fallback needs text, and what goes to the server with
+/// it is the caller's decision every time.
+#[derive(Clone, Debug)]
+pub struct FallbackOptions {
+    pub(crate) dataset: String,
+    pub(crate) keyword: String,
+    pub(crate) keyword_region: KeywordRegionMode,
+    pub(crate) collection: Option<String>,
+    pub(crate) sort: SortMode,
+}
+
+impl FallbackOptions {
+    /// Options for a search of `dataset` for `keyword`: no collection, fused order. The keyword is matched
+    /// on the device first, and goes to the server only when that finds nothing solid.
+    pub fn new(dataset: impl Into<String>, keyword: impl Into<String>, keyword_region: KeywordRegionMode) -> Self {
+        FallbackOptions {
+            dataset: dataset.into(),
+            keyword: keyword.into(),
+            keyword_region,
+            collection: None,
+            sort: SortMode::default(),
+        }
+    }
+
+    /// One collection of the dataset, such as `way`.
+    pub fn collection(mut self, collection: impl Into<String>) -> Self {
+        self.collection = Some(collection.into());
+        self
+    }
+
+    /// The order of the nearby hits.
+    pub fn sort(mut self, sort: SortMode) -> Self {
+        self.sort = sort;
+        self
+    }
+}
+
+/// What a keyword search found (contract §16).
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KeywordSearchResult {
+    /// The server's matches, in the server's order: no dedupe, no region filter, no ranking.
+    pub places: Vec<KeywordHit>,
+    /// The union of the attribution of every place, one entry per `(dataset, collection)`, sorted by dataset
+    /// and then collection (contract §4.10). Always a list.
+    pub attribution: Vec<Attribution>,
+    /// Always `keyword: true`; `region` is `Some(1.0)` when a region was given.
+    pub disclosed: Disclosure,
+}
+
+impl KeywordSearchResult {
+    /// No places and no attribution, with this disclosure.
+    pub(crate) fn empty(disclosed: Disclosure) -> Self {
+        KeywordSearchResult { places: Vec::new(), attribution: Vec::new(), disclosed }
+    }
+}
+
+/// One place a keyword search found. It has no distance and no score: the server ranks by neither, and an
+/// app can compute a distance from [`location`](KeywordHit::location).
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KeywordHit {
+    /// The place's identity: its `origin`, else the element's `uri`, else `None`.
+    pub origin: Option<String>,
+    /// The collection the hit belongs to, matched against the element's own attribution (contract §8).
+    pub collection: Option<CollectionKey>,
+    /// The record value as served.
+    pub place: Place,
+    pub importance: Option<i64>,
+}
+
+impl KeywordHit {
+    /// Where the hit came from: always `"keyword"`.
+    pub const fn via(&self) -> &'static str {
+        VIA_KEYWORD
+    }
+
+    /// The place's `name`, when that is a string.
+    pub fn name(&self) -> Option<&str> {
+        name_of(&self.place)
+    }
+
+    /// The point and box the client reads from the place's `locations`.
+    pub fn location(&self) -> PlaceLocation {
+        locations::locate(&self.place).public()
+    }
+}
+
+/// What [`search_nearby_then_by_keyword`](crate::AtgeoClient::search_nearby_then_by_keyword) found: the
+/// nearby search's result, with `places` holding both kinds of hit.
+///
+/// When the keyword was sent, the keyword hits come first, then the nearby hits the keyword answer did not
+/// already hold. `complete`, `overview`, `tiles` and `tile_failures` are the nearby search's.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FallbackSearchResult {
+    pub places: Vec<FallbackHit>,
+    pub complete: bool,
+    pub overview: bool,
+    pub tiles: TileCounts,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub tile_failures: Vec<TileFailure>,
+    /// The union of the nearby and keyword attribution, the nearby entry winning a tie.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attribution: Vec<Attribution>,
+    /// What the server learned during the call: `keyword` is true when the keyword request went out, and
+    /// `region` is the finest region sent (`0.01` if the nearby search sent anything, else `1` for a
+    /// [`KeywordRegionMode::Degree`] request, else `None`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub disclosed: Disclosure,
+}
+
+/// One place of a [`FallbackSearchResult`]: from the device's tiles, or from the server's keyword search.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FallbackHit {
+    Nearby(NearbyHit),
+    Keyword(KeywordHit),
+}
+
+impl FallbackHit {
+    /// `"tiles"` for a nearby hit, `"keyword"` for a keyword hit.
+    pub const fn via(&self) -> &'static str {
+        match self {
+            FallbackHit::Nearby(h) => h.via(),
+            FallbackHit::Keyword(h) => h.via(),
+        }
+    }
+
+    /// The place's identity: its `origin`, else its `uri`, else `None`.
+    pub fn origin(&self) -> Option<&str> {
+        match self {
+            FallbackHit::Nearby(h) => h.origin.as_deref(),
+            FallbackHit::Keyword(h) => h.origin.as_deref(),
+        }
+    }
+
+    /// The collection the hit belongs to, as for [`NearbyHit`] and [`KeywordHit`].
+    pub fn collection(&self) -> Option<&CollectionKey> {
+        match self {
+            FallbackHit::Nearby(h) => h.collection.as_ref(),
+            FallbackHit::Keyword(h) => h.collection.as_ref(),
+        }
+    }
+
+    /// The record value as served.
+    pub fn place(&self) -> &Place {
+        match self {
+            FallbackHit::Nearby(h) => &h.place,
+            FallbackHit::Keyword(h) => &h.place,
+        }
+    }
+
+    pub fn importance(&self) -> Option<i64> {
+        match self {
+            FallbackHit::Nearby(h) => h.importance,
+            FallbackHit::Keyword(h) => h.importance,
+        }
+    }
+
+    /// The place's `name`, when that is a string.
+    pub fn name(&self) -> Option<&str> {
+        name_of(self.place())
+    }
+
+    /// The point and box the client reads from the place's `locations`.
+    pub fn location(&self) -> PlaceLocation {
+        locations::locate(self.place()).public()
     }
 }
 
@@ -559,20 +850,23 @@ mod tests {
         assert_eq!((back.status, back.error.is_none()), (None, true));
         assert_eq!(back, refused);
 
-        let result = SearchResult {
+        let result = NearbySearchResult {
             places: Vec::new(),
             complete: false,
             overview: false,
             tiles: TileCounts { fetched: 0, failed: 1 },
             tile_failures: vec![failure],
             attribution: Vec::new(),
+            disclosed: Disclosure::new(false, Some(0.01)),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains(r#""tile_failures":[{"url":"https://t/a","kind":"status","status":503}]"#), "{json}");
-        assert_eq!(serde_json::from_str::<SearchResult>(&json).unwrap(), result);
+        assert_eq!(serde_json::from_str::<NearbySearchResult>(&json).unwrap(), result);
 
-        // A result serialized before tile_failures existed still reads, with none.
+        // A result serialized before tile_failures, attribution and disclosed existed still reads, with none.
         let old = r#"{"places":[],"complete":true,"overview":false,"tiles":{"fetched":1,"failed":0}}"#;
-        assert!(serde_json::from_str::<SearchResult>(old).unwrap().tile_failures.is_empty());
+        let old = serde_json::from_str::<NearbySearchResult>(old).unwrap();
+        assert!(old.tile_failures.is_empty());
+        assert_eq!(old.disclosed, Disclosure::new(false, None));
     }
 }

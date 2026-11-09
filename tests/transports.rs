@@ -268,7 +268,7 @@ fn assert_request_headers(requests: &[Request]) {
 
 /// A search whose tile URLs put a backslash before an `@` refuses both tiles without a request, so nothing
 /// reaches the host after the `@`, and no `Authorization` header either.
-fn assert_userinfo_behind_a_backslash_is_not_sent(server: &Server, result: &atgeo::SearchResult) {
+fn assert_userinfo_behind_a_backslash_is_not_sent(server: &Server, result: &atgeo::NearbySearchResult) {
     assert_eq!((result.tiles.fetched, result.tiles.failed), (0, 2), "{:?}", result.tile_failures);
     for f in &result.tile_failures {
         assert_eq!((f.kind, f.status), (atgeo::TileFailureKind::Refused, None), "{f:?}");
@@ -279,7 +279,7 @@ fn assert_userinfo_behind_a_backslash_is_not_sent(server: &Server, result: &atge
 }
 
 /// A search over a tile past the cap and a 404: a `Transport` failure and a `Status` one, in URL order.
-fn assert_cap_and_404_reported(server: &Server, result: &atgeo::SearchResult) {
+fn assert_cap_and_404_reported(server: &Server, result: &atgeo::NearbySearchResult) {
     use atgeo::{Error, TileFailureKind};
     let failures: Vec<_> = result.tile_failures.iter().map(|f| (f.url.clone(), f.kind, f.status)).collect();
     assert_eq!(
@@ -312,7 +312,7 @@ mod reqwest_cases {
     use std::sync::mpsc;
     use std::time::Instant;
 
-    use atgeo::{HttpTransport, Region, ReqwestTransport, SearchOptions};
+    use atgeo::{HttpTransport, NearbyOptions, Region, ReqwestTransport};
 
     use super::*;
 
@@ -412,9 +412,9 @@ mod reqwest_cases {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
         let result = client
-            .search_places(
+            .search_nearby(
                 Region::bbox(0.0, 0.0, 0.01, 0.01),
-                SearchOptions::new("overturemaps.org").collection("place"),
+                NearbyOptions::new("overturemaps.org").collection("place"),
             )
             .await
             .unwrap();
@@ -427,8 +427,8 @@ mod reqwest_cases {
     async fn reads_a_backslash_and_dot_segments_in_a_tile_url_as_whatwg_does() {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new("margins");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        let options = NearbyOptions::new("margins");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/a/b.json");
     }
@@ -437,8 +437,8 @@ mod reqwest_cases {
     async fn sends_no_userinfo_that_follows_a_backslash() {
         let server = Server::start(routes);
         let client = atgeo::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new("userinfo");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        let options = NearbyOptions::new("userinfo");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
     }
 
@@ -447,8 +447,8 @@ mod reqwest_cases {
         let server = Server::start(routes);
         let t = transport_with(Duration::from_secs(10)).max_body_bytes(CAP);
         let client = atgeo::AtgeoClient::with_transport(t).server(server.url(""));
-        let options = SearchOptions::new("failing");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
+        let options = NearbyOptions::new("failing");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).await.unwrap();
         assert_cap_and_404_reported(&server, &result);
     }
 
@@ -537,7 +537,7 @@ mod ureq_cases {
     use std::time::Instant;
 
     use atgeo::blocking::{HttpTransport, UreqTransport};
-    use atgeo::{Region, SearchOptions};
+    use atgeo::{NearbyOptions, Region};
 
     use super::*;
 
@@ -687,8 +687,8 @@ mod ureq_cases {
     fn sends_a_backslash_and_dot_segments_in_a_tile_url_as_given() {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new("margins");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        let options = NearbyOptions::new("margins");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));
         assert_eq!(server.requests()[1].path(), "/t/x/../a\\b.json");
     }
@@ -697,8 +697,8 @@ mod ureq_cases {
     fn sends_no_userinfo_that_follows_a_backslash() {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
-        let options = SearchOptions::new("userinfo");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        let options = NearbyOptions::new("userinfo");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_userinfo_behind_a_backslash_is_not_sent(&server, &result);
     }
 
@@ -707,8 +707,8 @@ mod ureq_cases {
         let server = Server::start(routes);
         let t = transport_with(Duration::from_secs(10), Duration::from_secs(20)).max_body_bytes(CAP);
         let client = atgeo::blocking::AtgeoClient::with_transport(t).server(server.url(""));
-        let options = SearchOptions::new("failing");
-        let result = client.search_places(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
+        let options = NearbyOptions::new("failing");
+        let result = client.search_nearby(Region::bbox(0.0, 0.0, 0.01, 0.01), options).unwrap();
         assert_cap_and_404_reported(&server, &result);
     }
 
@@ -764,9 +764,9 @@ mod ureq_cases {
         let server = Server::start(routes);
         let client = atgeo::blocking::AtgeoClient::with_transport(transport()).server(server.url(""));
         let result = client
-            .search_places(
+            .search_nearby(
                 Region::bbox(0.0, 0.0, 0.01, 0.01),
-                SearchOptions::new("overturemaps.org").collection("place"),
+                NearbyOptions::new("overturemaps.org").collection("place"),
             )
             .unwrap();
         assert_eq!((result.tiles.fetched, result.tiles.failed), (1, 0));

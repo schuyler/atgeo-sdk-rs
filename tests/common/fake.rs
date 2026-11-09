@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use atgeo::{BoxError, HttpResponse};
 use serde_json::{Map, Value, json};
+use unicode_normalization::UnicodeNormalization;
+use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
 pub const DEFAULT_SERVER: &str = "https://places.atgeo.org";
 const PUBLISHED_AT: &str = "2026-01-01T00:00:00Z";
@@ -123,6 +125,7 @@ struct State {
     offline: bool,
     network_errors: HashSet<String>,
     raw: HashMap<String, (u16, Vec<u8>)>,
+    raw_methods: HashMap<String, (u16, Vec<u8>)>,
     answer_everything: Option<(u16, Vec<u8>)>,
     delays: HashMap<String, Duration>,
     delays_containing: Vec<(String, Duration)>,
@@ -294,6 +297,67 @@ fn is_uri(s: &str) -> bool {
         && !s.chars().any(char::is_whitespace)
 }
 
+/// The server's `name_tokens` (search_index.sql), as the reference's fake writes it: lowercase, every mark
+/// stripped, apostrophes dropped, punctuation runs to spaces, final sigma folded, split on whitespace.
+pub fn name_tokens(s: &str) -> Vec<String> {
+    use GeneralCategory::*;
+    let stripped: String = s
+        .to_lowercase()
+        .nfd()
+        .filter(|c| !matches!(c.general_category(), NonspacingMark | SpacingMark | EnclosingMark))
+        .nfc()
+        .filter(|c| !matches!(c, '\'' | '\u{2019}' | '\u{02BC}'))
+        .map(|c| match c.general_category() {
+            ConnectorPunctuation | DashPunctuation | OpenPunctuation | ClosePunctuation | InitialPunctuation
+            | FinalPunctuation | OtherPunctuation => ' ',
+            SpaceSeparator | LineSeparator | ParagraphSeparator => ' ',
+            _ if c == '\u{03C2}' => '\u{03C3}',
+            _ => c,
+        })
+        .collect();
+    stripped.split(char::is_whitespace).filter(|t| !t.is_empty()).map(str::to_owned).collect()
+}
+
+/// The server's whole-degree bbox rules for `searchPlaces`, in its order: precision first, then validity.
+fn check_keyword_bbox(bbox: &str) -> Option<HttpResponse> {
+    let parts: Vec<&str> = bbox.split(',').collect();
+    let too_precise = |p: &str| p.contains(['e', 'E']) || p.split_once('.').is_some_and(|(_, frac)| !frac.is_empty());
+    if parts.len() == 4 && parts.iter().any(|p| too_precise(p)) {
+        return Some(xrpc_error(
+            "BboxTooPrecise",
+            "bbox coordinate has more than 0 decimal places; snap to 1 degree grid",
+            400,
+        ));
+    }
+    let invalid = |m: &str| Some(xrpc_error("InvalidBbox", m, 400));
+    // ^[+-]?(\d+\.?\d*|\.\d+)$ on the trimmed part
+    let number = |p: &str| {
+        let p = p.trim();
+        let p = p.strip_prefix(['+', '-']).unwrap_or(p);
+        let (int, frac) = p.split_once('.').map_or((p, None), |(i, f)| (i, Some(f)));
+        let digits = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
+        match frac {
+            None => !int.is_empty() && digits(int),
+            Some(f) => digits(int) && digits(f) && !(int.is_empty() && f.is_empty()),
+        }
+    };
+    if parts.len() != 4 || !parts.iter().all(|p| number(p)) {
+        return invalid("bbox must be four comma-separated numbers");
+    }
+    let n: Vec<f64> = parts.iter().map(|p| p.trim().parse().unwrap()).collect();
+    let (west, south, east, north) = (n[0], n[1], n[2], n[3]);
+    if west.abs() > 180.0 || east.abs() > 180.0 || south.abs() > 90.0 || north.abs() > 90.0 {
+        return invalid("bbox out of range");
+    }
+    if south >= north {
+        return invalid("bbox requires south < north");
+    }
+    if west >= east && !(west > 0.0 && east < 0.0 && west - east < 360.0) {
+        return invalid("bbox requires west < east");
+    }
+    None
+}
+
 struct InFlight<'a> {
     inner: &'a Inner,
     finished: bool,
@@ -357,6 +421,12 @@ impl FakeServer {
     /// Answers this URL with exactly this status and body, bypassing routing and validation.
     pub fn raw(&self, url: &str, status: u16, body: impl Into<Vec<u8>>) {
         self.state().raw.insert(url.to_owned(), (status, body.into()));
+    }
+
+    /// Answers every call of this XRPC method (any query) with exactly this status and body, bypassing
+    /// validation: a raw `searchPlaces` for the fixtures whose bodies need not validate.
+    pub fn raw_method(&self, nsid: &str, status: u16, body: impl Into<Vec<u8>>) {
+        self.state().raw_methods.insert(nsid.to_owned(), (status, body.into()));
     }
 
     /// Answers every request with this status and body.
@@ -447,27 +517,11 @@ impl FakeServer {
     }
 
     fn get_tiles(&self, p: &HashMap<String, String>) -> HttpResponse {
-        let dataset = &p["dataset"];
-        let collection = p.get("collection");
-        let has = |c: &Value, ds: &str| c.get("dataset").and_then(Value::as_str) == Some(ds);
-        let with_dataset: Vec<&FakeTileset> =
-            self.0.tilesets.iter().filter(|t| t.collections.iter().any(|c| has(c, dataset))).collect();
-        if with_dataset.is_empty() {
-            return xrpc_error("DatasetNotFound", &format!("Dataset {dataset} not found"), 400);
-        }
-        let selected: Vec<&&FakeTileset> = with_dataset
-            .iter()
-            .filter(|t| {
-                t.collections.iter().any(|c| {
-                    has(c, dataset)
-                        && collection.is_none_or(|want| c.get("collection").and_then(Value::as_str) == Some(want))
-                })
-            })
-            .collect();
-        if selected.is_empty() {
-            let c = collection.map_or("undefined", String::as_str);
-            return xrpc_error("CollectionNotFound", &format!("Collection {c} not found"), 400);
-        }
+        let (dataset, collection) = (&p["dataset"], p.get("collection"));
+        let selected = match self.select(dataset, collection) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
         let mut urls: Vec<String> = selected.iter().flat_map(|t| t.tiles.iter().map(|tile| tile.url.clone())).collect();
         urls.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
         let answer = match &self.0.tiles_for {
@@ -483,10 +537,101 @@ impl FakeServer {
         json_response(200, &answer)
     }
 
+    /// `org.atgeo.getPlace#placeView`, what getPlace answers and searchPlaces lists.
+    fn place_view(&self, tileset: &FakeTileset, found: &Value, origin: &str) -> Value {
+        let parts: Vec<&str> = origin.split(':').collect();
+        let rest = parts.get(4..).map(|r| r.join(":")).unwrap_or_default();
+        let mut view = json!({
+            "uri": origin,
+            "url": format!("{}/{}/{}/{rest}", self.0.server, parts[2], parts[3]),
+            "value": found["value"],
+            "attribution": Self::attribution_list(tileset),
+        });
+        if let Some(i) = found.get("importance") {
+            view["importance"] = i.clone();
+        }
+        view
+    }
+
+    /// The tilesets carrying the dataset (and collection), or the server's error; getTiles and searchPlaces.
+    fn select(&self, dataset: &str, collection: Option<&String>) -> Result<Vec<&FakeTileset>, HttpResponse> {
+        let has = |c: &Value, ds: &str| c.get("dataset").and_then(Value::as_str) == Some(ds);
+        let with_dataset: Vec<&FakeTileset> =
+            self.0.tilesets.iter().filter(|t| t.collections.iter().any(|c| has(c, dataset))).collect();
+        if with_dataset.is_empty() {
+            return Err(xrpc_error("DatasetNotFound", &format!("Dataset {dataset} not found"), 400));
+        }
+        let selected: Vec<&FakeTileset> = with_dataset
+            .into_iter()
+            .filter(|t| {
+                t.collections.iter().any(|c| {
+                    has(c, dataset)
+                        && collection.is_none_or(|want| c.get("collection").and_then(Value::as_str) == Some(want))
+                })
+            })
+            .collect();
+        if selected.is_empty() {
+            let c = collection.map_or("undefined", String::as_str);
+            return Err(xrpc_error("CollectionNotFound", &format!("Collection {c} not found"), 400));
+        }
+        Ok(selected)
+    }
+
+    fn search_places(&self, p: &HashMap<String, String>) -> HttpResponse {
+        let (dataset, collection, q) = (&p["dataset"], p.get("collection"), &p["q"]);
+        if let Some(r) = p.get("bbox").and_then(|b| check_keyword_bbox(b)) {
+            return r;
+        }
+        let selected = match self.select(dataset, collection) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let mut words: Vec<String> = Vec::new();
+        for w in name_tokens(q) {
+            if !words.contains(&w) {
+                words.push(w);
+            }
+        }
+        words.truncate(12);
+        if !words.iter().any(|w| w.chars().count() >= 2) {
+            return xrpc_error("KeywordRequired", "q needs a word of two or more characters", 400);
+        }
+        let prefix = collection.map(|c| format!("urn:atgeo:{dataset}:{c}:"));
+        let mut matches: Vec<(String, &FakeTileset, &Value)> = Vec::new();
+        for t in selected {
+            for tile in &t.tiles {
+                for found in &tile.records {
+                    let Some(origin) = found["value"]["origin"].as_str() else { continue };
+                    if prefix.as_deref().is_some_and(|pre| !origin.starts_with(pre))
+                        || matches.iter().any(|(o, _, _)| o == origin)
+                    {
+                        continue;
+                    }
+                    let variants = found["value"]["variants"].as_array().cloned().unwrap_or_default();
+                    let all: Vec<&str> = std::iter::once(&found["value"]["name"])
+                        .chain(variants.iter().map(|v| &v["name"]))
+                        .filter_map(Value::as_str)
+                        .collect();
+                    if all.iter().any(|n| {
+                        let tokens = name_tokens(n);
+                        words.iter().all(|w| tokens.iter().any(|t| t.starts_with(w.as_str())))
+                    }) {
+                        matches.push((origin.to_owned(), t, found));
+                    }
+                }
+            }
+        }
+        matches.sort_by(|(ao, _, a), (bo, _, b)| {
+            let imp = |v: &Value| v["importance"].as_i64().unwrap_or(0);
+            imp(b).cmp(&imp(a)).then_with(|| ao.encode_utf16().cmp(bo.encode_utf16()))
+        });
+        let places: Vec<Value> = matches.iter().map(|(o, t, found)| self.place_view(t, found, o)).collect();
+        json_response(200, &json!({ "places": places }))
+    }
+
     fn get_place(&self, origin: &str) -> HttpResponse {
         let parts: Vec<&str> = origin.split(':').collect();
         let (dataset, collection) = (parts.get(2).copied(), parts.get(3).copied());
-        let rest = parts.get(4..).map(|r| r.join(":")).unwrap_or_default();
         for t in &self.0.tilesets {
             let carries = t.collections.iter().any(|c| {
                 c.get("dataset").and_then(Value::as_str) == dataset
@@ -497,16 +642,7 @@ impl FakeServer {
             }
             for tile in &t.tiles {
                 if let Some(found) = tile.records.iter().find(|r| r["value"]["origin"].as_str() == Some(origin)) {
-                    let mut view = json!({
-                        "uri": origin,
-                        "url": format!("{}/{}/{}/{rest}", self.0.server, dataset.unwrap(), collection.unwrap()),
-                        "value": found["value"],
-                        "attribution": Self::attribution_list(t),
-                    });
-                    if let Some(i) = found.get("importance") {
-                        view["importance"] = i.clone();
-                    }
-                    return json_response(200, &view);
+                    return json_response(200, &self.place_view(t, found, origin));
                 }
             }
         }
@@ -518,6 +654,7 @@ impl FakeServer {
         let (allowed, required): (&[&str], &[&str]) = match nsid {
             "org.atgeo.getTiles" => (&["dataset", "collection", "bbox"], &["dataset", "bbox"]),
             "org.atgeo.getPlace" => (&["uri"], &["uri"]),
+            "org.atgeo.searchPlaces" => (&["dataset", "collection", "q", "bbox"], &["dataset", "q"]),
             "org.atgeo.describeService" => (&[], &[]),
             "org.atgeo.describeTileset" => (&["slug"], &["slug"]),
             _ => return xrpc_error("MethodNotImplemented", &format!("Method {nsid} not implemented"), 501),
@@ -536,11 +673,31 @@ impl FakeServer {
             return xrpc_error("InvalidRequest", &format!("Params must have the property \"{missing}\""), 400);
         }
         let too_long = |k: &str, max: usize| p.get(k).is_some_and(|v: &String| v.chars().count() > max);
-        if too_long("dataset", 253) || too_long("collection", 64) || too_long("bbox", 128) || too_long("slug", 64) {
+        if too_long("dataset", 253)
+            || too_long("collection", 64)
+            || too_long("bbox", 128)
+            || too_long("slug", 64)
+            || too_long("q", 256)
+        {
             return xrpc_error("InvalidRequest", "Parameter too long", 400);
         }
-        if p.get("bbox").is_some_and(|b| !bbox_pattern(b)) {
-            return xrpc_error("InvalidRequest", "bbox must match the two-decimal pattern", 400);
+        if nsid == "org.atgeo.getTiles" {
+            // The server refuses a coordinate with more than two decimals; the client always sends exactly two,
+            // so any other form is the client's bug, which the fake reports rather than answers (contract §13).
+            let bbox = &p["bbox"];
+            let precise = bbox.split(',').any(|c| {
+                c.rsplit_once('.').is_some_and(|(_, f)| f.len() >= 3 && f.bytes().all(|b| b.is_ascii_digit()))
+            });
+            if precise {
+                return xrpc_error(
+                    "BboxTooPrecise",
+                    "One or more bbox coordinates have more than 2 decimal places",
+                    400,
+                );
+            }
+            if !bbox_pattern(bbox) {
+                return xrpc_error("InvalidRequest", "fake: getTiles bbox is not the client's two-decimal form", 400);
+            }
         }
         if p.get("uri").is_some_and(|u| !is_uri(u)) {
             return xrpc_error("InvalidRequest", "uri must be a uri", 400);
@@ -548,6 +705,7 @@ impl FakeServer {
         match nsid {
             "org.atgeo.getTiles" => self.get_tiles(&p),
             "org.atgeo.getPlace" => self.get_place(&p["uri"]),
+            "org.atgeo.searchPlaces" => self.search_places(&p),
             "org.atgeo.describeService" => {
                 let tilesets: Vec<Value> = self
                     .0
@@ -580,6 +738,9 @@ impl FakeServer {
             }
         }
         if url.starts_with(&format!("{}/xrpc/", self.0.server)) {
+            if let Some((status, body)) = self.state().raw_methods.get(nsid(url)) {
+                return HttpResponse::new(*status, body.clone());
+            }
             return self.xrpc(url);
         }
         for t in &self.0.tilesets {

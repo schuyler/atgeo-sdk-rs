@@ -15,6 +15,9 @@ pub enum Error {
     Transport(BoxError),
     /// A bad argument, found before any request (contract §3).
     InvalidArgument(ArgumentError),
+    /// An autocompleter call that a later call on the same autocompleter replaced (contract §19). Ignore
+    /// it: nothing was cancelled on the caller's side, and a newer call is on its way to an answer.
+    Superseded,
 }
 
 /// No message repeats its source's, so that a report that walks the chain (anyhow's `{:#}`, say) says each
@@ -27,6 +30,7 @@ impl fmt::Display for Error {
             Error::Decoding(e) => e.fmt(f),
             Error::Transport(_) => f.write_str("transport error"),
             Error::InvalidArgument(e) => e.fmt(f),
+            Error::Superseded => f.write_str("superseded by a later call"),
         }
     }
 }
@@ -38,6 +42,7 @@ impl std::error::Error for Error {
             Error::Decoding(e) => e.source(),
             Error::Transport(e) => Some(e.as_ref()),
             Error::InvalidArgument(e) => e.source(),
+            Error::Superseded => None,
         }
     }
 }
@@ -129,7 +134,8 @@ pub enum ArgumentError {
     /// A region with a non-finite or out-of-range coordinate, a south edge above its north edge, or a
     /// negative or non-finite radius. The string says which kind of region it was.
     InvalidRegion(&'static str),
-    /// `SortMode::Similarity` with no text, or text that normalizes to nothing.
+    /// `SortMode::Similarity` with no text, or text (a keyword, for the fallback search) that normalizes to
+    /// nothing.
     SimilarityRequiresText,
     /// The configured server is not an absolute http or https URL with a host and no credentials.
     InvalidServer,
@@ -177,6 +183,7 @@ mod tests {
         let atgeo = AtgeoError::new("PlaceNotFound".into(), "no such place".into(), 404);
         assert_eq!(chain(&atgeo.into()), ["no such place (PlaceNotFound)"]);
         assert_eq!(chain(&ArgumentError::SimilarityRequiresText.into()), ["sort 'similarity' requires text"]);
+        assert_eq!(chain(&Error::Superseded), ["superseded by a later call"]);
     }
 
     #[test]

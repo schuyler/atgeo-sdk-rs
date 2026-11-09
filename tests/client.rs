@@ -3,7 +3,7 @@
 #[macro_use]
 mod common;
 
-use atgeo::{ArgumentError, Error, Region, SearchOptions, SortMode, TileFailureKind};
+use atgeo::{ArgumentError, Error, NearbyOptions, Region, SortMode, TileFailureKind};
 use common::*;
 
 // describe("getPlace")
@@ -91,7 +91,7 @@ mod get_place {
                 vec![record(uri_only.clone(), Some(4), Some("https://example.org/r/u"))],
             )])]);
             let client = kind.client(&fake);
-            let result = client.ok(REGION, SearchOptions::new("overturemaps.org"));
+            let result = client.ok(REGION, NearbyOptions::new("overturemaps.org"));
             assert_eq!(result.places[0].origin.as_deref(), Some("https://example.org/r/u"));
             fake.go_offline();
             let found = client.get_place("https://example.org/r/u").unwrap();
@@ -329,7 +329,7 @@ mod describe {
 }
 
 // describe("searchPlaces results")
-mod search_places_results {
+mod search_nearby_results {
     use super::*;
 
     fn records() -> Vec<Value> {
@@ -396,7 +396,12 @@ mod search_places_results {
             let none = client.ok(CIRCLE, overture_options());
             let blank = client.ok(CIRCLE, overture_options().text("   "));
             assert!(!blank.places.is_empty());
-            assert_eq!(blank, none);
+            // The same search, which `none` already warmed, so it told the server nothing.
+            assert_eq!(disclosed(&none), (false, Some(0.01)));
+            assert_eq!(disclosed(&blank), (false, None));
+            let mut expected = none.clone();
+            expected.disclosed = blank.disclosed;
+            assert_eq!(blank, expected);
             assert!(blank.places.iter().all(|h| h.score.is_none()));
         }
     }
@@ -406,7 +411,7 @@ mod search_places_results {
 mod ordering_among_places_containing_the_center {
     use super::*;
 
-    fn ids(kind: Kind, values: Vec<(Value, i64)>, region: Region, options: SearchOptions) -> Vec<String> {
+    fn ids(kind: Kind, values: Vec<(Value, i64)>, region: Region, options: NearbyOptions) -> Vec<String> {
         let records = values.into_iter().map(|(v, i)| record(v, Some(i), None)).collect();
         let fake = FakeServer::with_tilesets(vec![overture(vec![tile(&url("a"), records)])]);
         let prefix = place_origin("");
@@ -502,9 +507,9 @@ mod datasets_and_collections {
         fn keys_the_tile_list_on_dataset_and_collection(kind: Kind) {
             let fake = setup();
             let client = kind.client(&fake);
-            client.ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
-            client.ok(REGION, SearchOptions::new("openstreetmap.org"));
-            client.ok(REGION, SearchOptions::new("overturemaps.org"));
+            client.ok(REGION, NearbyOptions::new("openstreetmap.org").collection("way"));
+            client.ok(REGION, NearbyOptions::new("openstreetmap.org"));
+            client.ok(REGION, NearbyOptions::new("overturemaps.org"));
             let keys: Vec<String> = fake
                 .tile_list_requests()
                 .iter()
@@ -523,7 +528,7 @@ mod datasets_and_collections {
                 overview: None,
                 tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772)), rec(osm_place("wayside", "9", 37.773))])],
             }]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(origins(&result), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
         }
     }
@@ -531,7 +536,7 @@ mod datasets_and_collections {
     both! {
         fn searches_a_whole_dataset_when_only_the_dataset_is_named(kind: Kind) {
             let fake = setup();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("openstreetmap.org"));
             let mut got: Vec<String> = result.places.iter().map(|h| h.origin.clone().unwrap()).collect();
             got.sort();
             assert_eq!(got, [
@@ -548,19 +553,19 @@ mod datasets_and_collections {
     both! {
         fn filters_to_one_collection_dropping_records_with_no_origin(kind: Kind) {
             let fake = setup();
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(origins(&result), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
             assert_eq!(param(&first(&fake), "collection").as_deref(), Some("way"));
         }
     }
 
     // The dataset is required and has no default (contract §4.1). In Rust a missing or non-string dataset, and
-    // a collection named without one, cannot be written (`SearchOptions::new` takes the dataset; see its
+    // a collection named without one, cannot be written (`NearbyOptions::new` takes the dataset; see its
     // compile_fail doctests), so what is left to test is that an empty one is a string like any other.
     both! {
         fn sends_an_empty_dataset_to_the_server(kind: Kind) {
             let fake = setup();
-            let e = kind.client(&fake).search(REGION, SearchOptions::new("")).unwrap_err();
+            let e = kind.client(&fake).search(REGION, NearbyOptions::new("")).unwrap_err();
             assert!(matches!(e, Error::Atgeo(_)), "{e:?}");
             let lists = fake.tile_list_requests();
             assert_eq!(lists.len(), 1);
@@ -570,7 +575,7 @@ mod datasets_and_collections {
 
     both! {
         fn gives_each_hit_the_collection_its_origin_names_by_prefix_and_none_to_a_hit_keyed_by_uri(kind: Kind) {
-            let result = kind.client(&setup()).ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let result = kind.client(&setup()).ok(REGION, NearbyOptions::new("openstreetmap.org"));
             let by_origin: std::collections::BTreeMap<String, Value> = result
                 .places
                 .iter()
@@ -598,7 +603,7 @@ mod datasets_and_collections {
                 overview: None,
                 tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772)), rec(osm_place("wayside", "9", 37.773))])],
             }]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("openstreetmap.org"));
             let mut got: Vec<(String, String)> = result
                 .places
                 .iter()
@@ -629,7 +634,7 @@ mod datasets_and_collections {
                 overview: None,
                 tiles: vec![tile(&url("osm"), vec![rec(osm_place("way", "2", 37.772))])],
             }]);
-            let result = kind.client(&fake).ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            let result = kind.client(&fake).ok(REGION, NearbyOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(attribution_json(&result.attribution), json!([
                 { "dataset": "openstreetmap.org", "collection": "node", "source": "https://www.openstreetmap.org" },
                 { "dataset": "openstreetmap.org", "collection": "relation" },
@@ -661,9 +666,9 @@ mod datasets_and_collections {
                 )],
             }]);
             let client = kind.client(&fake);
-            let filtered = client.ok(REGION, SearchOptions::new("openstreetmap.org").collection("way"));
+            let filtered = client.ok(REGION, NearbyOptions::new("openstreetmap.org").collection("way"));
             assert_eq!(origins(&filtered), [Some("urn:atgeo:openstreetmap.org:way:2".to_owned())]);
-            let whole = client.ok(REGION, SearchOptions::new("openstreetmap.org"));
+            let whole = client.ok(REGION, NearbyOptions::new("openstreetmap.org"));
             let got: std::collections::BTreeMap<_, _> =
                 whole.places.iter().map(|h| (h.origin.clone().unwrap(), h.collection.is_some())).collect();
             assert_eq!(got, std::collections::BTreeMap::from([

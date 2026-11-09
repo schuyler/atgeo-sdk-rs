@@ -1,0 +1,117 @@
+[
+  {
+    "name": "empty",
+    "keyword": "",
+    "qualifies": false
+  },
+  {
+    "name": "whitespace only",
+    "keyword": "   ",
+    "qualifies": false
+  },
+  {
+    "name": "one letter",
+    "keyword": "a",
+    "qualifies": false
+  },
+  {
+    "name": "two letters",
+    "keyword": "ab",
+    "qualifies": true
+  },
+  {
+    "name": "two one-letter words",
+    "keyword": "a b",
+    "qualifies": false
+  },
+  {
+    "name": "punctuation splits a word",
+    "keyword": "a.b",
+    "qualifies": false
+  },
+  {
+    "name": "an apostrophe joins a word",
+    "keyword": "o'k",
+    "qualifies": true
+  },
+  {
+    "name": "case and accents removed",
+    "keyword": "É",
+    "qualifies": false
+  },
+  {
+    "name": "a combining accent is not a character",
+    "keyword": "é",
+    "qualifies": false
+  },
+  {
+    "name": "one Hangul syllable, though NFKD gives two jamo",
+    "keyword": "하",
+    "qualifies": false
+  },
+  {
+    "name": "two Hangul syllables",
+    "keyword": "하나",
+    "qualifies": true
+  },
+  {
+    "name": "a consonant with a spacing vowel sign (Mc)",
+    "keyword": "का",
+    "qualifies": false
+  },
+  {
+    "name": "two consonants with a spacing vowel sign",
+    "keyword": "काख",
+    "qualifies": true
+  },
+  {
+    "name": "a letter with an enclosing mark (Me)",
+    "keyword": "a⃝",
+    "qualifies": false
+  },
+  {
+    "name": "two letters with an enclosing mark",
+    "keyword": "ab⃝",
+    "qualifies": true
+  },
+  {
+    "name": "a duplicate does not use a slot among the twelve",
+    "keyword": "a a a a a a a a a a a a bb",
+    "qualifies": true
+  },
+  {
+    "name": "only the first twelve distinct words count",
+    "keyword": "a b c d e f g h i j k l mm",
+    "qualifies": false
+  },
+  {
+    "name": "the twelfth distinct word counts",
+    "keyword": "a b c d e f g h i j k mm",
+    "qualifies": true
+  },
+  {
+    "name": "an astral letter is one character",
+    "keyword": "𝐀",
+    "qualifies": false
+  },
+  {
+    "name": "two astral letters",
+    "keyword": "𝐀𝐁",
+    "qualifies": true
+  },
+  {
+    "name": "the ligature fi, which NFKD expands (the server refuses it, section 17)",
+    "keyword": "ﬁ",
+    "qualifies": true
+  },
+  {
+    "name": "only punctuation",
+    "keyword": "&-!",
+    "qualifies": false
+  },
+  {
+    "name": "a symbol is not punctuation",
+    "keyword": "+$",
+    "qualifies": true
+  }
+]

@@ -6,9 +6,13 @@ use crate::attribution::collection_of;
 use crate::cache::TileRecord;
 use crate::locations::{Locations, distance_to, locate, record_key};
 use crate::text::Query;
-use crate::types::{Attribution, SearchHit, SortMode};
+use crate::types::{Attribution, NearbyHit, SortMode};
 
+/// Contract §7: a word match (tier 1) is kept whatever its score; a fuzzy-only match (tier 2) needs
+/// `FUZZY_THRESHOLD`. A query that has text but no words once folded has no tokens to match, so every record
+/// is tier 1 and it falls back to `JW_THRESHOLD`, the threshold before the tiers.
 const JW_THRESHOLD: f64 = 0.6;
+const FUZZY_THRESHOLD: f64 = 0.8;
 
 /// Relative spherical area; a point is 0, so it ranks before any box containing it.
 fn specificity(locations: &Locations) -> f64 {
@@ -38,7 +42,7 @@ pub(crate) fn cmp_utf16(a: &str, b: &str) -> Ordering {
 }
 
 struct Ranked {
-    hit: SearchHit,
+    hit: NearbyHit,
     /// 1 or 2 with text, `None` without (contract §7).
     tier: Option<u8>,
     specificity: f64,
@@ -81,15 +85,21 @@ pub(crate) fn rank<'a>(
     query: Option<&Query>,
     sort: SortMode,
     overview: bool,
-) -> Vec<SearchHit> {
+) -> Vec<NearbyHit> {
     let mut ranked: Vec<Ranked> = records
         .into_iter()
         .filter_map(|(record, attribution)| {
             let score = query.map(|q| q.score(&record.value));
-            if score.is_some_and(|s| s < JW_THRESHOLD) {
+            // The tier is computed for every record when there is text, since it decides the threshold.
+            let tier = query.map(|q| q.tier(&record.value));
+            let threshold = match tier {
+                _ if query.is_some_and(Query::wordless) => JW_THRESHOLD,
+                Some(2) => FUZZY_THRESHOLD,
+                _ => 0.0,
+            };
+            if score.is_some_and(|s| s < threshold) {
                 return None;
             }
-            let tier = query.map(|q| q.tier(&record.value));
             if overview && tier == Some(2) {
                 return None;
             }
@@ -97,7 +107,7 @@ pub(crate) fn rank<'a>(
             // The region filter already required a location, so there is a distance.
             let distance = distance_to(&locations, center.0, center.1)?;
             Some(Ranked {
-                hit: SearchHit {
+                hit: NearbyHit {
                     origin: record_key(record).map(str::to_owned),
                     collection: collection_of(&record.value, attribution),
                     place: record.value.clone(),

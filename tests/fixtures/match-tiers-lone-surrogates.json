@@ -1,0 +1,26 @@
+[
+  {
+    "name": "high-surrogate-prefixes-its-pair",
+    "query": "\ud83d",
+    "place": { "name": "😀 bar" },
+    "tier": 1
+  },
+  {
+    "name": "high-surrogate-after-letters-prefixes-its-pair",
+    "query": "a\ud83d",
+    "place": { "name": "a😀" },
+    "tier": 1
+  },
+  {
+    "name": "low-surrogate-does-not-prefix-a-pair",
+    "query": "\ude00",
+    "place": { "name": "😀" },
+    "tier": 2
+  },
+  {
+    "name": "high-surrogate-without-its-pair",
+    "query": "\ud83d",
+    "place": { "name": "bar" },
+    "tier": 2
+  }
+]
