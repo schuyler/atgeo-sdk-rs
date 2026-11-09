@@ -216,7 +216,7 @@ A place matches when each word of the keyword begins a word of one of its names,
 
 A keyword the server cannot use (none of its first twelve distinct words, once case, accents and punctuation are gone, is two characters long) is not an argument error: it is sent, and the server answers `Error::Atgeo` with the code `KeywordRequired`. A keyword over 256 bytes of UTF-8 is answered `InvalidRequest`.
 
-**The trade.** A nearby search tells the server a 0.01° cell and never what you were looking for. A keyword search tells it the words, and, if you pass a region, a one-degree cell around the area. The server keeps no log of what it receives (garganorn's privacy design), but an operator who chose to could record the keyword together with the time and the address the request came from. Whether that is acceptable for a feature is your decision, and `disclosed` on every result says what a call sent.
+**The trade.** A nearby search tells the server a 0.01° cell and never what you were looking for. A keyword search tells it the words, and, if you pass a region, a one-degree cell around the area. The server keeps no log of it (garganorn's privacy design), but a hostile operator can record what it receives, the keyword together with the time and the address the request came from. Whether that is acceptable for a feature is your decision, and `disclosed` on every result says what a call sent.
 
 ### `search_nearby_then_by_keyword(region, options) -> FallbackSearchResult`
 
@@ -232,7 +232,7 @@ A keyword the server refuses with `KeywordRequired`, though the client's check l
 
 For a search box that shows places as you type. Make one autocompleter per text field; its `search_by_keyword(keyword)` is [`search_by_keyword`](#search_by_keyword) with the options fixed.
 
-**Every keyword that qualifies is sent to the server as typed, prefixes included**: typing `Starbucks` sends `St`, `Sta`, `Star` and so on, a request each, and the server sees all of them. A keyword the server would refuse makes no request and resolves empty with `disclosed.keyword` false. The server keeps no log of what it receives, and an operator who chose to could record it. Debouncing reduces how many prefixes go out, and is your choice; the autocompleter does not debounce.
+**Every keyword that qualifies is sent to the server as typed, prefixes included**: typing `Starbucks` sends `St`, `Sta`, `Star` and so on, a request each, and the server sees all of them. A keyword the server would refuse makes no request and resolves empty with `disclosed.keyword` false. The server keeps no log of it (garganorn's privacy design), and a hostile operator can record what it receives. Debouncing reduces how many prefixes go out, and is your choice; the autocompleter does not debounce.
 
 Each call supersedes the previous call on the same autocompleter, at the moment you call it, and the superseded call resolves to `Error::Superseded`: **ignore it**; it is not a failure and nothing was cancelled on your side. Dropping a call's future cancels it and its request, as everywhere. A keyword the server refuses with `KeywordRequired` resolves empty with `disclosed.keyword` true (and `region` `1` if the autocompleter has one). Two autocompleters on one client do not supersede each other. There is no autocompleter in the blocking client: a blocking call cannot be cancelled in flight.
 

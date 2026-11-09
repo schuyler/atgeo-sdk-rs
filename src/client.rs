@@ -156,9 +156,9 @@ impl<T: HttpTransport> AtgeoClient<T> {
     ///
     /// The privacy trade is this. A nearby search tells the server only a coarse area (0.01°) and never
     /// what was searched for; a keyword search tells it the words, and a region only as coarse as a
-    /// degree, if one is given. The server's design keeps no log of what it receives (garganorn's privacy
-    /// design), but an operator who chose to could record the keyword with the time and the address the
-    /// request came from. Whether that is acceptable is the app's decision; a nearby search is
+    /// degree, if one is given. The server keeps no log of it (garganorn's privacy design), but a hostile
+    /// operator can record what it receives, the keyword with the time and the address the request came
+    /// from. Whether that is acceptable is the app's decision; a nearby search is
     /// [`search_nearby`](Self::search_nearby).
     ///
     /// Fails with `Error::InvalidArgument` for a malformed region, before any request. A keyword the server

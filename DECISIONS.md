@@ -15,7 +15,7 @@ This port was built to the Rust spec, [`docs/rust-sdk-spec.md`](https://github.c
 
 ## What the spec left open
 
-- **Fixtures** are vendored from atgeo-sdk-js at `2710a14`, the port contract revision of atgeo-sdk-js#43 (attribution, hit collections, a required dataset, the `getPlace` value shape). They were `7b8a400` when the port was built, and are now at `fc56331` (see the revision of atgeo-sdk-js#63 below).
+- **Fixtures** are vendored from atgeo-sdk-js at `2710a14`, the port contract revision of atgeo-sdk-js#43 (attribution, hit collections, a required dataset, the `getPlace` value shape). They were `7b8a400` when the port was built, and are now at `5ce9448` (the revision of atgeo-sdk-js#55 below, then #63 and #67).
 - **The base branch.** The repository had no commits, so its `main` starts with the shared `LICENSE` alone, giving the port's pull request something to target.
 - **`rustfmt.toml`** sets `max_width = 120`, which keeps the contract's comparator chains and test tables on one line each.
 - **`publish = false`** in `Cargo.toml` until the beta ends (spec §2, distribution), so nothing reaches crates.io by accident.
@@ -56,7 +56,7 @@ The spec says `NearbyOptions::new(dataset)`, without `Default` or a `.dataset()`
 - **Bbox fields** are `west`, `south`, `east`, `north` (garganorn#16); `Region::bbox` still takes them in that order.
 - **`examples/e2e.rs`** is unchanged in what it checks; it can't pass until the server work in garganorn#27 is deployed, and it isn't skipped.
 
-## The port contract revision of atgeo-sdk-js#63 (keyword search)
+## The port contract revision of atgeo-sdk-js#55 (keyword search)
 
 The Rust spec says what the keyword methods look like; the build chose, where it did not:
 
