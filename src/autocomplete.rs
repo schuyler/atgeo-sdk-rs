@@ -44,8 +44,8 @@ impl<'a, T: HttpTransport> KeywordAutocomplete<'a, T> {
     ///
     /// **Every keyword that qualifies is sent to the server as given, prefixes included**: typing `Starbucks`
     /// sends `St`, `Sta`, `Star` and so on, each as a request of its own, unless the app sends fewer. The
-    /// server keeps no log of what it receives (garganorn's privacy design); an operator who chose to could
-    /// record it. Debouncing reduces how many prefixes go out and is the app's choice: this does not
+    /// server keeps no log of it (garganorn's privacy design); a hostile operator can record what it
+    /// receives. Debouncing reduces how many prefixes go out and is the app's choice: this does not
     /// debounce. A keyword the server would refuse (no word of two characters among its first twelve
     /// distinct words) makes no request and resolves with an empty result whose `disclosed` is
     /// `keyword: false`; one the server refuses anyway, with `KeywordRequired`, resolves empty with
